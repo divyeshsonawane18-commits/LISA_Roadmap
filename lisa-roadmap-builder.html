@@ -1,0 +1,2143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LISA Roadmap Builder</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=DM+Sans:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<style>
+:root {
+  --lisa-gradient: linear-gradient(90deg, #4A90E2 0%, #9B59B6 60%, #E76F8F 90%, #F4A261 100%);
+  --primary-900: #212967; --primary-700: #3d4fbf; --primary-600: #4f63d2; --primary-50: #edeffe;
+  --grey-900: #131927; --grey-800: #1e293b; --grey-700: #334155; --grey-500: #64748b; --grey-300: #cbd5e1; --grey-100: #f1f5f9; --grey-50: #f8fafc;
+  --success-600: #10b981; --success-50: #ecfdf5; --success-700: #059669;
+  --warning-600: #f59e0b; --warning-50: #fffbeb;
+  --danger-600: #ef4444; --danger-50: #fef2f2;
+  --info-600: #3b82f6; --info-50: #eff6ff;
+  --brand-violet: #9747ff; --brand-violet-soft: #ede9fe;
+  --surface-page: #f2f3f7; --surface-card: #ffffff; --surface-border: #e2e8f0; --surface-hairline: #e5e7ea;
+  --fg-1: var(--grey-900); --fg-2: var(--grey-700); --fg-3: var(--grey-500);
+  --shadow-100: 0px 1px 2px rgba(19,25,39,.06); --shadow-200: 0px 2px 8px rgba(19,25,39,.08); --shadow-300: 0px 4px 16px rgba(19,25,39,.1);
+  --font-display: 'Nunito Sans', sans-serif; --font-body: 'Nunito Sans', sans-serif; --font-ui: 'DM Sans', sans-serif;
+  --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 9999px;
+  --status-yet: #9CA3AF; --status-progress: #FBBF24; --status-done: #10B981;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-body); background: var(--surface-page); color: var(--fg-1); min-height: 100vh; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--grey-300); border-radius: 3px; }
+input, select, textarea { font-family: var(--font-body); outline: none; }
+button { font-family: var(--font-ui); cursor: pointer; border: none; }
+.drag-over { outline: 2px dashed #4f63d2 !important; background: #edeffe !important; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ─── DATA MODEL ───
+const STATUSES = [
+  { id: 'yet', label: 'Yet to Start', color: '#9CA3AF', bg: '#F3F4F6', text: '#374151' },
+  { id: 'progress', label: 'In Progress', color: '#FBBF24', bg: '#FEF3C7', text: '#92400E' },
+  { id: 'done', label: 'Completed', color: '#10B981', bg: '#D1FAE5', text: '#065F46' },
+];
+const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
+const PRIORITY_COLORS = { Critical: '#ef4444', High: '#f59e0b', Medium: '#3b82f6', Low: '#64748b' };
+
+const SEED_DATA = {
+  quarters: [
+    { id: 'completed', label: 'Completed', order: 0 },
+    { id: 'q1-2026', label: 'Q1 2026 (Jan to Mar)', order: 1 },
+    { id: 'q2-2026', label: 'Q2 2026 (Apr to Jun)', order: 2 },
+    { id: 'q3-2026', label: 'Q3 2026 (Jul to Sept)', order: 3 },
+    { id: 'q4-2026', label: 'Q4 2026 (Oct to Dec)', order: 4 },
+  ],
+  workstreams: [
+    { id: 'briefing', label: 'Briefing Agent', order: 0, color: '#4f63d2' },
+    { id: 'decision', label: 'Decision Agent', order: 1, color: '#7c3aed' },
+    { id: 'query', label: 'Query Agent', order: 2, color: '#0891b2' },
+    { id: 'datainsights', label: 'Data Insights Agent', order: 3, color: '#059669' },
+    { id: 'costcalc', label: 'Cost Calculator Agent', order: 4, color: '#d97706' },
+    { id: 'collab', label: 'Collaboration Agent', order: 5, color: '#db2777' },
+    { id: 'teams', label: 'LISA on Teams', order: 6, color: '#2563eb' },
+    { id: 'alerting', label: 'Alerting Agent', order: 7, color: '#dc2626' },
+    { id: 'protocols', label: 'Protocols & Technical Implementation', order: 8, color: '#64748b' },
+    { id: 'intel360', label: 'Intel 360', order: 9, color: '#0d9488' },
+    { id: 'voice', label: 'Voice based Interaction', order: 10, color: '#7c3aed' },
+    { id: 'personalization', label: 'Personalization', order: 11, color: '#e76f8f' },
+    { id: 'projectagent', label: 'Project Agent', order: 12, color: '#10b981' },
+    { id: 'workfront', label: 'Workfront Integration', order: 13, color: '#f59e0b' },
+    { id: 'onboarding', label: 'Onboarding Agent', order: 14, color: '#6366f1' },
+    { id: 'escalation', label: 'Escalation Management', order: 15, color: '#ef4444' },
+    { id: 'forecasting', label: 'Forecasting & Capacity Planning', order: 16, color: '#8b5cf6' },
+  ],
+  items: [
+    // ── BRIEFING AGENT ──
+    { id: 'b1', title: 'Briefing in Conversational Way', description: 'Enable conversational briefing experience via LISA chat interface', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b2', title: 'Chat/voice Instruction based briefing', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b3', title: 'Email to brief conversion', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b4', title: 'User Context aware', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b5', title: 'Completeness checks', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b6', title: 'Validation checks', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b7', title: 'Dependent field management', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b8', title: 'Auto categorize additional briefing information', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b9', title: 'Interactive edit', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b10', title: 'Recommendation based on briefing context', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b11', title: 'Query resolution on briefing fields', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b12', title: 'Real time Agent Logs', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b13', title: 'Reuse/Clone existing briefing', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b14', title: 'Audio call recording to brief conversion', description: '', owner: '', priority: 'High', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['briefing', 'audio'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b15', title: 'Post processing audio call recording to extract accurate brief information', description: '', owner: '', priority: 'High', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['briefing', 'audio'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b16', title: 'Save the briefing as draft & resume whenever needed', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b17', title: 'Multi file brief extraction', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'briefing', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b18', title: 'Multi Project Briefing', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'briefing', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b19', title: 'Multilingual briefing', description: '', owner: '', priority: 'Medium', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'briefing', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b20', title: 'User context aware by using User Knowledge Graph', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'briefing', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['briefing', 'knowledge-graph'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b21', title: 'Field input suggestion based on briefing context', description: '', owner: '', priority: 'Medium', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-06-30', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b22', title: 'Brand context aware by using Brand Knowledge Graph', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['briefing', 'knowledge-graph'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b23', title: 'Country context aware by using Country Knowledge Graph', description: '', owner: '', priority: 'Medium', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['briefing', 'knowledge-graph'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b24', title: 'Brief Completeness - dynamically asking follow up questions in logical order', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b25', title: 'Field correctness - identify incorrect information and suggest corrective action', description: '', owner: '', priority: 'High', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b26', title: 'Integration with other 3rd party tool - Aprimo', description: '', owner: '', priority: 'High', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['briefing', 'integration', 'aprimo'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b27', title: 'Recommendations based on previous conversations', description: '', owner: '', priority: 'Medium', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'b28', title: 'Video call recording to brief conversion', description: '', owner: '', priority: 'Medium', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'briefing', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['briefing', 'video'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── DECISION AGENT ──
+    { id: 'd1', title: 'Decision Agent to auto route query to relevant agent', description: 'Core routing capability for the Decision Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'decision', status: 'yet', startDate: '', targetDate: '', tags: ['decision', 'routing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'd2', title: 'Intent recognition to identify type of query', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'decision', status: 'done', startDate: '', targetDate: '', tags: ['decision'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'd3', title: 'Auto Query Routing Between Agents', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'decision', status: 'done', startDate: '', targetDate: '', tags: ['decision'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'd4', title: 'Ambiguous Query Management', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'decision', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['decision'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'd5', title: 'Multi Query handling', description: '', owner: '', priority: 'Medium', quarter: 'q2-2026', plannedQuarter: 'q2-2026', originalQuarter: 'q2-2026', workstream: 'decision', status: 'done', startDate: '', targetDate: '2026-06-30', tags: ['decision'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── QUERY AGENT ──
+    { id: 'q1', title: 'Query any information on guides, playbooks, knowledge material', description: 'Core capability of the Query Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'query', status: 'yet', startDate: '', targetDate: '', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q2', title: 'Answers based on guides & playbooks', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q3', title: 'Multilingual response', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q4', title: 'Follow up query suggestion', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q5', title: 'Query Autocomplete', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q6', title: 'Prompting templates', description: '', owner: '', priority: 'Low', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q7', title: 'Teams Integration', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '', tags: ['query', 'teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q8', title: 'Real time Agent logs', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q9', title: 'Parse any content file (PDF, PPT, Word)', description: '', owner: '', priority: 'High', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['query', 'parsing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q10', title: 'Parse any content format (table, image, flowchart)', description: '', owner: '', priority: 'High', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['query', 'parsing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q11', title: 'Display images in answers for reference', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'query', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q12', title: 'Progressive answer display', description: '', owner: '', priority: 'Medium', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'query', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['query', 'ux'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'q13', title: 'Build knowledge graph for Brand guidelines', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'query', status: 'yet', startDate: '', targetDate: '2026-06-30', tags: ['query', 'knowledge-graph'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── DATA INSIGHTS AGENT ──
+    { id: 'di1', title: 'Fetch real time data across projects', description: 'Core mission of the Data Insights Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'datainsights', status: 'yet', startDate: '', targetDate: '', tags: ['data-insights'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'di2', title: 'Text to SQL query generation', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'datainsights', status: 'done', startDate: '', targetDate: '', tags: ['data-insights', 'sql'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'di3', title: 'Real time data fetch', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'datainsights', status: 'done', startDate: '', targetDate: '', tags: ['data-insights'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'di4', title: 'Answers with interactive visuals', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'datainsights', status: 'done', startDate: '', targetDate: '', tags: ['data-insights', 'visuals'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'di5', title: 'Access control on Data', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'datainsights', status: 'done', startDate: '', targetDate: '', tags: ['data-insights', 'access'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'di6', title: 'Follow up query suggestion', description: '', owner: '', priority: 'Low', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'datainsights', status: 'done', startDate: '', targetDate: '', tags: ['data-insights'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'di7', title: 'Prompting templates', description: '', owner: '', priority: 'Low', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'datainsights', status: 'done', startDate: '', targetDate: '', tags: ['data-insights'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── COST CALCULATOR AGENT ──
+    { id: 'cc1', title: 'Fetch exact cost for deliverables', description: 'Core mission of the Cost Calculator Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'costcalc', status: 'yet', startDate: '', targetDate: '', tags: ['cost-calc'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'cc2', title: 'Conversational based cost calculation', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'costcalc', status: 'done', startDate: '', targetDate: '', tags: ['cost-calc'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'cc3', title: 'Access Control', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'costcalc', status: 'done', startDate: '', targetDate: '', tags: ['cost-calc', 'access'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'cc4', title: 'Calculate cost for multiple assets', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'costcalc', status: 'yet', startDate: '', targetDate: '2026-06-30', tags: ['cost-calc'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── COLLABORATION AGENT ──
+    { id: 'ca1', title: 'Communication Summarizer & Assisted Reply', description: 'Core mission of the Collaboration Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'collab', status: 'yet', startDate: '', targetDate: '', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca2', title: 'Summarize entire conversation thread', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'collab', status: 'done', startDate: '', targetDate: '', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca3', title: 'Sentiment Analysis', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'collab', status: 'done', startDate: '', targetDate: '', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca4', title: 'Actions performed & predict next actions', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'collab', status: 'done', startDate: '', targetDate: '', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca5', title: 'Multilingual summary', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'collab', status: 'done', startDate: '', targetDate: '', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca6', title: 'Assisted Reply with language & tone support', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'collab', status: 'done', startDate: '', targetDate: '', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca7', title: 'Real time Agent Logs', description: '', owner: '', priority: 'Medium', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'collab', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca8', title: 'Actionable recommendations for resolving negative sentiments', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'collab', status: 'yet', startDate: '', targetDate: '2026-06-30', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca9', title: 'Auto suggest reply based on previous conversation', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'collab', status: 'yet', startDate: '', targetDate: '2026-06-30', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ca10', title: 'Smart summaries & insights for all omnichannel campaign projects', description: '', owner: '', priority: 'Medium', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'collab', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── LISA ON TEAMS ──
+    { id: 't1', title: 'Teams Integration', description: 'Core mission: integrate LISA into Microsoft Teams', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'teams', status: 'yet', startDate: '', targetDate: '', tags: ['teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't2', title: 'Query agent on teams', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'teams', status: 'done', startDate: '', targetDate: '', tags: ['teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't3', title: 'Data insights agent on teams', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'teams', status: 'done', startDate: '', targetDate: '', tags: ['teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't4', title: 'Feedback capture', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'teams', status: 'done', startDate: '', targetDate: '', tags: ['teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't5', title: 'Access control', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'teams', status: 'done', startDate: '', targetDate: '', tags: ['teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't6', title: 'Display images in answers when querying on teams channel', description: '', owner: '', priority: 'Medium', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'teams', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't7', title: 'To – do actions', description: '', owner: '', priority: 'Medium', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'teams', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['teams'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't8', title: 'Cost Calculator Agent', description: '', owner: '', priority: 'High', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'teams', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['teams', 'cost-calc'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 't9', title: 'Alerting Agent', description: '', owner: '', priority: 'High', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'teams', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['teams', 'alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── ALERTING AGENT ──
+    { id: 'al1', title: 'Real time Smart & Risk Alerts', description: 'Core mission of the Alerting Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'alerting', status: 'yet', startDate: '', targetDate: '', tags: ['alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'al2', title: 'Engagement health check alerts', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'alerting', status: 'done', startDate: '', targetDate: '', tags: ['alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'al3', title: 'Risk alerts', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'alerting', status: 'done', startDate: '', targetDate: '', tags: ['alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'al4', title: 'To do action alerts', description: '', owner: '', priority: 'Medium', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'alerting', status: 'done', startDate: '', targetDate: '', tags: ['alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'al5', title: 'Proactive risk pattern detection & alerting', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'alerting', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'al6', title: 'Escalation Alerts', description: '', owner: '', priority: 'Medium', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'alerting', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── PROTOCOLS & TECHNICAL IMPLEMENTATION ──
+    { id: 'pt1', title: 'Technical Implementation', description: 'Core technical infrastructure & protocols', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'protocols', status: 'yet', startDate: '', targetDate: '', tags: ['technical'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pt2', title: 'Interaction with all external tools via MCP', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'protocols', status: 'done', startDate: '', targetDate: '', tags: ['technical', 'mcp'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pt3', title: 'AGUI for agentic logs across all features', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'protocols', status: 'done', startDate: '', targetDate: '', tags: ['technical', 'agui'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pt4', title: 'LLM Model Update to GPT 5', description: '', owner: '', priority: 'High', quarter: 'q1-2026', plannedQuarter: 'q1-2026', originalQuarter: 'q1-2026', workstream: 'protocols', status: 'done', startDate: '', targetDate: '2026-03-31', tags: ['technical', 'llm'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pt5', title: 'Langfuse based observability', description: '', owner: '', priority: 'Medium', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'protocols', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['technical', 'observability'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── INTEL 360 ──
+    { id: 'in1', title: 'Intel across users, brands, countries', description: 'Core mission of Intel 360', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'intel360', status: 'yet', startDate: '', targetDate: '', tags: ['intel360'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'in2', title: 'User Intel Dashboard', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'intel360', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['intel360', 'dashboard'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'in3', title: 'Brand Intel Dashboard', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'intel360', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['intel360', 'dashboard'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'in4', title: 'Country Intel Dashboard', description: '', owner: '', priority: 'High', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'intel360', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['intel360', 'dashboard'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── VOICE BASED INTERACTION ──
+    { id: 'vo1', title: 'Voice Interactions', description: 'Core mission: enable voice-based LISA interactions', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'voice', status: 'yet', startDate: '', targetDate: '', tags: ['voice'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'vo2', title: 'Speech to text via Whisper API', description: '', owner: '', priority: 'High', quarter: 'completed', plannedQuarter: 'pre-2026', originalQuarter: 'pre-2026', workstream: 'voice', status: 'done', startDate: '', targetDate: '', tags: ['voice'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'vo3', title: 'Voice mode for complete hands-free interaction', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', originalQuarter: 'q2-2026', workstream: 'voice', status: 'done', startDate: '', targetDate: '2026-06-30', tags: ['voice'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'vo4', title: 'Live transcribe of speech', description: '', owner: '', priority: 'Medium', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'voice', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['voice'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── PERSONALIZATION ──
+    { id: 'pe1', title: 'Personalization (LISA Context)', description: 'Core mission: contextual personalization for LISA', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'personalization', status: 'yet', startDate: '', targetDate: '', tags: ['personalization'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pe2', title: 'Contextual nudges to complete assigned tasks', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'personalization', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['personalization'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pe3', title: 'Proactive alerts with additional context on priority items', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'personalization', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['personalization'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pe4', title: 'Proactive alerts on items which need immediate attention', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'personalization', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['personalization'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pe5', title: 'Role-specific recommendations & next-best actions', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'personalization', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['personalization'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pe6', title: 'Real time proactive risk alerts', description: '', owner: '', priority: 'High', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'personalization', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['personalization', 'alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── PROJECT AGENT ──
+    { id: 'pa1', title: 'Project Insights', description: 'Core mission of the Project Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'projectagent', status: 'yet', startDate: '', targetDate: '', tags: ['project-agent'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pa2', title: 'Fetch any information within the project', description: '', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'projectagent', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['project-agent'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pa3', title: 'Summarize entire project information with one click', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'projectagent', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['project-agent'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pa4', title: 'Context aware task execution suggestion', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'projectagent', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['project-agent'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'pa5', title: 'Auto execute workflow task based on user prompt (Field updates, workflow task completion, comment addition)', description: '', owner: '', priority: 'Critical', quarter: 'q4-2026', plannedQuarter: 'q4-2026', workstream: 'projectagent', status: 'yet', startDate: '', targetDate: '2026-12-31', tags: ['project-agent', 'automation'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── WORKFRONT INTEGRATION ──
+    { id: 'wf1', title: 'Workfront Integration', description: 'Core mission: integrate LISA with Adobe Workfront', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'workfront', status: 'yet', startDate: '', targetDate: '', tags: ['workfront'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'wf2', title: 'Briefing Agent', description: 'Briefing Agent integration with Workfront', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'workfront', status: 'progress', startDate: '', targetDate: '2026-06-30', tags: ['workfront', 'briefing'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'wf3', title: 'Query Resolution Agent', description: 'Query Resolution Agent integration with Workfront', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'workfront', status: 'yet', startDate: '', targetDate: '2026-06-30', tags: ['workfront', 'query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'wf4', title: 'Data Insights Agent', description: 'Data Insights Agent integration with Workfront', owner: '', priority: 'High', quarter: 'q2-2026', plannedQuarter: 'q2-2026', workstream: 'workfront', status: 'yet', startDate: '', targetDate: '2026-06-30', tags: ['workfront', 'data-insights'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'wf5', title: 'Cost Calculator Agent', description: 'Cost Calculator Agent integration with Workfront', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'workfront', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['workfront', 'cost-calc'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'wf6', title: 'Collaboration Agent', description: 'Collaboration Agent integration with Workfront', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'workfront', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['workfront', 'collaboration'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'wf7', title: 'Risk Alerting Agent', description: 'Risk Alerting Agent integration with Workfront', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'workfront', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['workfront', 'alerting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── ONBOARDING AGENT ──
+    { id: 'ob1', title: 'AI Coach', description: 'Core mission of the Onboarding Agent', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'onboarding', status: 'yet', startDate: '', targetDate: '', tags: ['onboarding'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ob2', title: 'LISA driven onboarding to Engagement', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'onboarding', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['onboarding'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ob3', title: 'Onboarding in Multiple languages', description: '', owner: '', priority: 'Medium', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'onboarding', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['onboarding'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'ob4', title: 'Query Agent', description: 'Query Agent capability within onboarding', owner: '', priority: 'Medium', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'onboarding', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['onboarding', 'query'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── ESCALATION MANAGEMENT ──
+    { id: 'es1', title: 'Escalation Manager', description: 'Core mission of the Escalation Management workstream', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'escalation', status: 'yet', startDate: '', targetDate: '', tags: ['escalation'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'es2', title: 'Auto Escalation triaging & routing', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'escalation', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['escalation'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'es3', title: 'Auto RCA Generation', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'escalation', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['escalation'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+
+    // ── FORECASTING & CAPACITY PLANNING ──
+    { id: 'fc1', title: 'Forecasting Agent', description: 'Core mission of the Forecasting & Capacity Planning workstream', owner: '', priority: 'Critical', quarter: 'completed', plannedQuarter: 'pre-2026', workstream: 'forecasting', status: 'yet', startDate: '', targetDate: '', tags: ['forecasting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'fc2', title: 'Auto recommend & create forecast with historical data', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'forecasting', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['forecasting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+    { id: 'fc3', title: 'Auto recommend & create forecast based on competitive landscape, number of campaigns', description: '', owner: '', priority: 'High', quarter: 'q3-2026', plannedQuarter: 'q3-2026', workstream: 'forecasting', status: 'yet', startDate: '', targetDate: '2026-09-30', tags: ['forecasting'], notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', activity: [], dependencies: [] },
+  ]
+};
+
+// ─── FIREBASE PERSISTENCE ───
+const FB_CFG_KEY = 'lisa-roadmap-firebase-cfg';
+
+function getFirebaseCfg() {
+  try { return JSON.parse(localStorage.getItem(FB_CFG_KEY) || 'null'); } catch { return null; }
+}
+function saveFirebaseCfg(cfg) {
+  localStorage.setItem(FB_CFG_KEY, JSON.stringify(cfg));
+}
+function clearFirebaseCfg() {
+  localStorage.removeItem(FB_CFG_KEY);
+}
+
+let _fbApp = null, _fbDb = null;
+function initFirebase(cfg) {
+  try {
+    if (_fbApp) { try { _fbApp.delete(); } catch {} }
+    _fbApp = firebase.initializeApp(cfg, 'lisa-roadmap-' + Date.now());
+    _fbDb = firebase.database(_fbApp);
+    return true;
+  } catch(e) { console.error('Firebase init failed', e); return false; }
+}
+function fbRef() { return _fbDb ? _fbDb.ref('roadmap') : null; }
+
+// Migration: backfill plannedQuarter on every item that's missing it.
+// plannedQuarter = the quarter the feature was originally assigned to, set once, never changed.
+// For done items already sitting in 'completed' column, use originalQuarter if available.
+function migrateData(data) {
+  const items = (data.items||[]).map(item => {
+    let i = { ...item };
+    // Derive plannedQuarter if missing
+    if (!i.plannedQuarter) {
+      if (i.originalQuarter && i.originalQuarter !== 'pre-2026') {
+        i.plannedQuarter = i.originalQuarter;
+      } else if (i.quarter && i.quarter !== 'completed') {
+        i.plannedQuarter = i.quarter;
+      } else if (i.originalQuarter === 'pre-2026') {
+        i.plannedQuarter = 'pre-2026';
+      } else {
+        i.plannedQuarter = 'pre-2026'; // fallback for old completed items with no quarter
+      }
+    }
+    // For done items still sitting in a real quarter column (not yet moved), push to completed
+    if (i.status === 'done' && i.quarter !== 'completed') {
+      i.quarter = 'completed';
+    }
+    return i;
+  });
+  return { ...data, items };
+}
+
+function loadData() {
+  try {
+    // Try localStorage first (v5, then v4 for backwards compat), then SEED
+    const saved = localStorage.getItem('lisa-roadmap-v5') || localStorage.getItem('lisa-roadmap-v4');
+    return migrateData(saved ? JSON.parse(saved) : SEED_DATA);
+  } catch { return migrateData(SEED_DATA); }
+}
+function genId() { return 'i' + Date.now() + Math.random().toString(36).slice(2,6); }
+function now() { return new Date().toISOString().slice(0,10); }
+
+// ─── FIREBASE SETUP SCREEN ───
+function FirebaseSetup({ onConnected }) {
+  const [cfg, setCfg] = useState({
+    apiKey:'', authDomain:'', databaseURL:'', projectId:'', storageBucket:'', messagingSenderId:'', appId:''
+  });
+  const [error, setError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [pasteMode, setPasteMode] = useState(true);
+  const [rawPaste, setRawPaste] = useState('');
+
+  const parseAndFill = (text) => {
+    // Accept either the full Firebase config object JS/JSON or just the databaseURL
+    const patterns = {
+      apiKey: /apiKey:\s*["']([^"']+)["']/,
+      authDomain: /authDomain:\s*["']([^"']+)["']/,
+      databaseURL: /databaseURL:\s*["']([^"']+)["']/,
+      projectId: /projectId:\s*["']([^"']+)["']/,
+      storageBucket: /storageBucket:\s*["']([^"']+)["']/,
+      messagingSenderId: /messagingSenderId:\s*["']([^"']+)["']/,
+      appId: /appId:\s*["']([^"']+)["']/,
+    };
+    const parsed = {};
+    let found = 0;
+    for (const [k, re] of Object.entries(patterns)) {
+      const m = text.match(re);
+      if (m) { parsed[k] = m[1]; found++; }
+    }
+    if (found >= 2) { setCfg(c=>({...c,...parsed})); setError(''); }
+    else setError('Could not parse config — try filling fields manually below.');
+  };
+
+  const connect = async () => {
+    setError(''); setTesting(true);
+    if (!cfg.apiKey || !cfg.databaseURL) {
+      setError('API Key and Database URL are required.'); setTesting(false); return;
+    }
+    if (!cfg.databaseURL.includes('firebaseio.com') && !cfg.databaseURL.includes('firebasedatabase.app')) {
+      setError('Database URL should end in .firebaseio.com or .firebasedatabase.app'); setTesting(false); return;
+    }
+    const ok = initFirebase(cfg);
+    if (!ok) { setError('Firebase initialisation failed — check your config.'); setTesting(false); return; }
+    // Test write/read
+    try {
+      const ref = fbRef();
+      await ref.child('_ping').set(Date.now());
+      saveFirebaseCfg(cfg);
+      setTesting(false);
+      onConnected();
+    } catch(e) {
+      setError('Connection failed: ' + (e.message||'check your database rules allow read/write'));
+      setTesting(false);
+    }
+  };
+
+  const field = (label, key, placeholder) => (
+    <div style={{ marginBottom:12 }}>
+      <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>{label}</label>
+      <input value={cfg[key]} onChange={e=>setCfg(c=>({...c,[key]:e.target.value}))} placeholder={placeholder}
+        style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13 }}
+        onFocus={e=>e.target.style.borderColor='#4f63d2'} onBlur={e=>e.target.style.borderColor='var(--surface-border)'} />
+    </div>
+  );
+
+  return (
+    <div style={{ padding:'0' }}>
+      {/* Header */}
+      <div style={{ padding:'20px 28px', borderBottom:'1px solid var(--surface-hairline)', background:'linear-gradient(135deg, #edeffe 0%, #fdf4ff 100%)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12 }}>
+            <div style={{ width:40, height:40, borderRadius:'var(--r-lg)', background:'var(--lisa-gradient)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <span style={{ color:'#fff', fontWeight:800, fontSize:18 }}>L</span>
+            </div>
+            <div>
+              <div style={{ fontSize:18, fontWeight:800, fontFamily:'var(--font-display)' }}>
+                <span style={{ background:'var(--lisa-gradient)', WebkitBackgroundClip:'text', backgroundClip:'text', color:'transparent' }}>LISA Roadmap</span>
+              </div>
+              <div style={{ fontSize:11, color:'var(--grey-500)', fontWeight:600, textTransform:'uppercase', letterSpacing:.5 }}>Team Collaboration Setup</div>
+            </div>
+          </div>
+          <p style={{ fontSize:13, color:'var(--grey-600)', lineHeight:1.6, margin:0 }}>
+            Connect a Firebase Realtime Database so your entire team edits the same live roadmap. Takes 2 minutes to set up — free tier is plenty.
+          </p>
+        </div>
+
+        <div style={{ padding:'24px 32px' }}>
+          {/* Step guide */}
+          <div style={{ background:'var(--grey-50)', borderRadius:'var(--r-lg)', padding:'14px 16px', marginBottom:20, border:'1px solid var(--surface-hairline)' }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'var(--grey-700)', marginBottom:8 }}>Quick setup (2 min)</div>
+            {[
+              ['1', 'Go to', 'console.firebase.google.com', 'https://console.firebase.google.com'],
+              ['2', 'Create a project → Build → Realtime Database → Create database', '', ''],
+              ['3', 'Start in test mode (you can secure it later)', '', ''],
+              ['4', 'Project Settings → Your apps → Add Web app → copy the config', '', ''],
+            ].map(([n, text, link, href])=>(
+              <div key={n} style={{ display:'flex', gap:8, alignItems:'flex-start', marginBottom:5 }}>
+                <span style={{ width:18, height:18, borderRadius:'50%', background:'var(--lisa-gradient)', color:'#fff', fontSize:10, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, marginTop:1 }}>{n}</span>
+                <span style={{ fontSize:12, color:'var(--grey-600)' }}>
+                  {text}{' '}
+                  {link && <a href={href} target="_blank" style={{ color:'#4f63d2', fontWeight:600 }}>{link}</a>}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Paste toggle */}
+          <div style={{ display:'flex', gap:2, background:'var(--grey-100)', borderRadius:'var(--r-md)', padding:3, marginBottom:16 }}>
+            {[['paste','Paste config (recommended)'],['manual','Fill manually']].map(([v,l])=>(
+              <button key={v} onClick={()=>setPasteMode(v==='paste')} style={{ flex:1, padding:'6px', borderRadius:'var(--r-sm)', border:'none',
+                background: pasteMode===(v==='paste') ? '#fff' : 'transparent', fontWeight:700, fontSize:12,
+                color: pasteMode===(v==='paste') ? 'var(--fg-1)' : 'var(--grey-500)', boxShadow: pasteMode===(v==='paste') ? 'var(--shadow-100)' : 'none' }}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {pasteMode ? (
+            <div style={{ marginBottom:16 }}>
+              <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>
+                Paste your Firebase config here
+              </label>
+              <textarea value={rawPaste} onChange={e=>{ setRawPaste(e.target.value); parseAndFill(e.target.value); }}
+                rows={7} placeholder={`const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  authDomain: "...",\n  databaseURL: "https://...-default-rtdb.firebaseio.com",\n  projectId: "...",\n  ...\n};`}
+                style={{ width:'100%', padding:'10px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:12, fontFamily:'monospace', resize:'vertical' }} />
+              {cfg.databaseURL && (
+                <div style={{ marginTop:6, fontSize:11, color:'#059669', fontWeight:600 }}>
+                  ✓ Parsed — Database URL: {cfg.databaseURL}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              {field('API Key *', 'apiKey', 'AIzaSy...')}
+              {field('Database URL *', 'databaseURL', 'https://your-project-default-rtdb.firebaseio.com')}
+              {field('Project ID', 'projectId', 'your-project-id')}
+              {field('Auth Domain', 'authDomain', 'your-project.firebaseapp.com')}
+              {field('App ID', 'appId', '1:123456:web:abcdef')}
+            </div>
+          )}
+
+          {error && (
+            <div style={{ padding:'10px 14px', background:'#fee2e2', borderRadius:'var(--r-md)', border:'1px solid #fca5a5', fontSize:13, color:'#dc2626', marginBottom:12 }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ display:'flex', gap:10 }}>
+            <button onClick={connect} disabled={testing}
+              style={{ flex:1, padding:'11px', borderRadius:'var(--r-md)', border:'none',
+                background: testing ? 'var(--grey-300)' : 'var(--lisa-gradient)', color:'#fff', fontSize:14, fontWeight:700, cursor: testing ? 'not-allowed' : 'pointer' }}>
+              {testing ? 'Connecting…' : 'Connect & Open Roadmap →'}
+            </button>
+          </div>
+
+          <div style={{ marginTop:16, padding:'10px 14px', background:'#eff6ff', borderRadius:'var(--r-md)', border:'1px solid #bfdbfe', fontSize:12, color:'#1d4ed8' }}>
+            <strong>Share with your team:</strong> Once connected, just send them this HTML file. They paste the same Firebase config and they're editing the same live roadmap.
+          </div>
+        </div>
+    </div>
+  );
+}
+
+// ─── CONNECTION STATUS INDICATOR ───
+function SyncIndicator({ status, fbReady }) {
+  const cfg = {
+    local:    { color:'#6b7280', label:'Local only', dot:'#9ca3af' },
+    syncing:  { color:'#f59e0b', label:'Saving…',    dot:'#fbbf24' },
+    synced:   { color:'#059669', label:'Team sync',  dot:'#10b981' },
+    error:    { color:'#dc2626', label:'Sync error', dot:'#ef4444' },
+  }[status] || { color:'#6b7280', label:'Local', dot:'#9ca3af' };
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:cfg.color, fontWeight:600 }}>
+      <span style={{ width:6, height:6, borderRadius:'50%', background:cfg.dot,
+        animation: status==='syncing' ? 'pulse 1s infinite' : 'none' }} />
+      {cfg.label}
+    </div>
+  );
+}
+
+// ─── STATUS BADGE ───
+function StatusBadge({ status, small, onChange }) {
+  const s = STATUSES.find(x => x.id === status) || STATUSES[0];
+  const [open, setOpen] = useState(false);
+  if (!onChange) return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:4, padding: small ? '2px 8px' : '3px 10px',
+      borderRadius: 'var(--r-pill)', background: s.bg, color: s.text, fontSize: small ? 11 : 12, fontWeight:600, fontFamily:'var(--font-ui)', whiteSpace:'nowrap' }}>
+      <span style={{ width:6, height:6, borderRadius:'50%', background:s.color, flexShrink:0 }} />
+      {s.label}
+    </span>
+  );
+  return (
+    <div style={{ position:'relative', display:'inline-block' }}>
+      <span onClick={e=>{e.stopPropagation();setOpen(o=>!o);}} style={{ display:'inline-flex', alignItems:'center', gap:4,
+        padding: small ? '2px 8px' : '3px 10px', borderRadius:'var(--r-pill)', background:s.bg, color:s.text,
+        fontSize: small ? 11 : 12, fontWeight:600, fontFamily:'var(--font-ui)', cursor:'pointer', whiteSpace:'nowrap',
+        border: `1px solid ${s.color}33` }}>
+        <span style={{ width:6, height:6, borderRadius:'50%', background:s.color, flexShrink:0 }} />{s.label}
+        <span style={{ fontSize:10, marginLeft:2 }}>▾</span>
+      </span>
+      {open && (
+        <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, background:'#fff', border:'1px solid var(--surface-border)',
+          borderRadius:'var(--r-lg)', boxShadow:'var(--shadow-300)', zIndex:1000, minWidth:140, overflow:'hidden' }}
+          onClick={e=>e.stopPropagation()}>
+          {STATUSES.map(st => (
+            <div key={st.id} onClick={()=>{onChange(st.id);setOpen(false);}}
+              style={{ padding:'8px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:8,
+                background: st.id===status ? st.bg : 'transparent', fontSize:13 }}
+              onMouseEnter={e=>{ if(st.id!==status) e.currentTarget.style.background=st.bg; }}
+              onMouseLeave={e=>{ if(st.id!==status) e.currentTarget.style.background='transparent'; }}>
+              <span style={{ width:8, height:8, borderRadius:'50%', background:st.color }} />
+              <span style={{ color:st.text, fontWeight:600, fontSize:12 }}>{st.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PRIORITY BADGE ───
+function PriorityBadge({ priority }) {
+  const c = PRIORITY_COLORS[priority] || '#64748b';
+  return <span style={{ display:'inline-flex', alignItems:'center', gap:3, padding:'2px 8px', borderRadius:'var(--r-pill)',
+    background:`${c}15`, color:c, fontSize:11, fontWeight:700, fontFamily:'var(--font-ui)' }}>{priority}</span>;
+}
+
+// ─── MODAL ───
+function Modal({ onClose, title, children, wide }) {
+  useEffect(() => {
+    const h = e => { if(e.key==='Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, []);
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(19,25,39,.5)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
+      onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
+      <div style={{ background:'#fff', borderRadius:'var(--r-xl)', boxShadow:'var(--shadow-300)', width:'100%', maxWidth: wide ? 780 : 560,
+        maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        <div style={{ padding:'20px 24px', borderBottom:'1px solid var(--surface-border)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+          <h2 style={{ fontSize:18, fontWeight:700, fontFamily:'var(--font-display)' }}>{title}</h2>
+          <button onClick={onClose} style={{ background:'none', width:32, height:32, borderRadius:'var(--r-md)',
+            display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, color:'var(--grey-500)',
+            transition:'all .15s' }} onMouseEnter={e=>e.currentTarget.style.background='var(--grey-100)'}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}>✕</button>
+        </div>
+        <div style={{ overflowY:'auto', flex:1 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ITEM FORM ───
+function ItemForm({ item, quarters, workstreams, allItems, onSave, onClose }) {
+  const isNew = !item?.id;
+  const [form, setForm] = useState(item || {
+    title:'', description:'', owner:'', priority:'Medium', quarter: quarters[0]?.id || '',
+    workstream: workstreams[0]?.id || '', status:'yet', startDate:'', targetDate:'', tags:'', notes:'', dependencies:[]
+  });
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const handleSave = () => {
+    if (!form.title.trim()) return alert('Title is required');
+    const tagArr = typeof form.tags === 'string' ? form.tags.split(',').map(t=>t.trim()).filter(Boolean) : form.tags;
+    onSave({ ...form, tags: tagArr, updatedAt: now(), createdAt: form.createdAt || now(),
+      activity: [...(form.activity||[]), { type: isNew?'created':'updated', label: isNew?'Item created':'Item updated', ts: now() }]
+    });
+  };
+  const field = (label, el) => (
+    <div style={{ marginBottom:16 }}>
+      <label style={{ display:'block', fontSize:13, fontWeight:600, color:'var(--fg-2)', marginBottom:5, fontFamily:'var(--font-ui)' }}>{label}</label>
+      {el}
+    </div>
+  );
+  const inp = (k, type='text', placeholder='') => (
+    <input type={type} value={form[k]||''} placeholder={placeholder} onChange={e=>set(k,e.target.value)}
+      style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)',
+        fontSize:14, transition:'border-color .15s' }}
+      onFocus={e=>e.target.style.borderColor='#4f63d2'} onBlur={e=>e.target.style.borderColor='var(--surface-border)'} />
+  );
+  const otherItems = allItems.filter(i => i.id !== form.id);
+  return (
+    <div style={{ padding:'24px' }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        <div style={{ gridColumn:'1/-1' }}>{field('Title *', inp('title','text','Enter initiative title'))}</div>
+        <div style={{ gridColumn:'1/-1' }}>{field('Description', <textarea value={form.description||''} onChange={e=>set('description',e.target.value)} rows={2}
+          style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, resize:'vertical', fontFamily:'var(--font-body)' }}
+          onFocus={e=>e.target.style.borderColor='#4f63d2'} onBlur={e=>e.target.style.borderColor='var(--surface-border)'} />)}</div>
+        {field('Owner', inp('owner','text','Name or team'))}
+        {field('Priority', <select value={form.priority} onChange={e=>set('priority',e.target.value)}
+          style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, background:'#fff' }}>
+          {PRIORITIES.map(p => <option key={p}>{p}</option>)}</select>)}
+        {field('Quarter', <select value={form.quarter} onChange={e=>set('quarter',e.target.value)}
+          style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, background:'#fff' }}>
+          {quarters.map(q => <option key={q.id} value={q.id}>{q.label}</option>)}</select>)}
+        {field('Workstream', <select value={form.workstream} onChange={e=>set('workstream',e.target.value)}
+          style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, background:'#fff' }}>
+          {workstreams.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}</select>)}
+        {field('Status', <select value={form.status} onChange={e=>set('status',e.target.value)}
+          style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, background:'#fff' }}>
+          {STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</select>)}
+        {field('Start Date', inp('startDate','date'))}
+        {field('Target Date', inp('targetDate','date'))}
+        {field('Tags', inp('tags','text','comma, separated, tags'))}
+        {field('Dependencies', <select multiple value={form.dependencies||[]} onChange={e=>set('dependencies',Array.from(e.target.selectedOptions).map(o=>o.value))}
+          style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, height:80, background:'#fff' }}>
+          {otherItems.map(i => <option key={i.id} value={i.id}>{i.title}</option>)}</select>)}
+        <div style={{ gridColumn:'1/-1' }}>{field('Notes', <textarea value={form.notes||''} onChange={e=>set('notes',e.target.value)} rows={3}
+          placeholder="Additional context, decisions, risks..."
+          style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, resize:'vertical', fontFamily:'var(--font-body)' }}
+          onFocus={e=>e.target.style.borderColor='#4f63d2'} onBlur={e=>e.target.style.borderColor='var(--surface-border)'} />)}</div>
+      </div>
+      <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:8 }}>
+        <button onClick={onClose} style={{ padding:'9px 20px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)',
+          background:'#fff', fontSize:14, color:'var(--fg-2)', fontWeight:600 }}>Cancel</button>
+        <button onClick={handleSave} style={{ padding:'9px 20px', borderRadius:'var(--r-md)',
+          background:'linear-gradient(90deg,#4A90E2,#9B59B6)', color:'#fff', fontSize:14, fontWeight:700, border:'none' }}>
+          {isNew ? 'Add Initiative' : 'Save Changes'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── DETAIL PANEL ───
+function ItemDetail({ item, quarters, workstreams, allItems, onUpdate, onDelete, onClose }) {
+  const [editing, setEditing] = useState(false);
+  const q = quarters.find(q=>q.id===item.quarter);
+  const w = workstreams.find(w=>w.id===item.workstream);
+  if (editing) return (
+    <Modal title="Edit Initiative" onClose={()=>setEditing(false)} wide>
+      <ItemForm item={item} quarters={quarters} workstreams={workstreams} allItems={allItems}
+        onSave={updated=>{onUpdate(updated);setEditing(false);}} onClose={()=>setEditing(false)} />
+    </Modal>
+  );
+  return (
+    <div style={{ padding:24 }}>
+      <div style={{ display:'flex', alignItems:'flex-start', gap:12, marginBottom:20 }}>
+        <div style={{ flex:1 }}>
+          <h2 style={{ fontSize:20, fontWeight:800, marginBottom:8 }}>{item.title}</h2>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+            <StatusBadge status={item.status} onChange={s=>onUpdate({...item,status:s,updatedAt:now(),activity:[...(item.activity||[]),{type:'status',label:`Status → ${STATUSES.find(x=>x.id===s)?.label}`,ts:now()}]})} />
+            <PriorityBadge priority={item.priority} />
+            {(item.tags||[]).map(t=><span key={t} style={{ padding:'2px 8px', borderRadius:'var(--r-pill)', background:'var(--brand-violet-soft)', color:'var(--brand-violet)', fontSize:11, fontWeight:600 }}>{t}</span>)}
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={()=>setEditing(true)} style={{ padding:'7px 14px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)', background:'#fff', fontSize:13, fontWeight:600, color:'var(--fg-2)' }}>Edit</button>
+          <button onClick={()=>{if(confirm('Delete this initiative?')){onDelete(item.id);onClose();}}} style={{ padding:'7px 14px', borderRadius:'var(--r-md)', border:'none', background:'#fee2e2', fontSize:13, fontWeight:600, color:'#dc2626' }}>Delete</button>
+        </div>
+      </div>
+      {item.description && <p style={{ fontSize:14, color:'var(--fg-2)', marginBottom:20, lineHeight:1.6 }}>{item.description}</p>}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:20 }}>
+        {[['Owner', item.owner||'—'], ['Quarter', q?.label||'—'], ['Workstream', w?.label||'—'], ['Start Date', item.startDate||'—'], ['Target Date', item.targetDate||'—'], ['Completed On', item.completedAt||'—'], ['Created', item.createdAt||'—']].map(([k,v])=>(
+          <div key={k} style={{ padding:'10px 14px', background: k==='Completed On'&&item.completedAt ? '#ECFDF5' : 'var(--grey-50)', borderRadius:'var(--r-md)', border:`1px solid ${k==='Completed On'&&item.completedAt?'#6EE7B7':'var(--surface-hairline)'}` }}>
+            <div style={{ fontSize:11, fontWeight:600, color: k==='Completed On'&&item.completedAt?'#059669':'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5, marginBottom:3 }}>{k}</div>
+            <div style={{ fontSize:13, fontWeight:600, color: k==='Completed On'&&item.completedAt?'#064e3b':'var(--fg-1)' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      {(item.dependencies||[]).length > 0 && (
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5, marginBottom:8 }}>Dependencies</div>
+          {(item.dependencies||[]).map(depId=>{
+            const dep = allItems.find(i=>i.id===depId);
+            return dep ? <div key={depId} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', background:'#f8fafc', borderRadius:'var(--r-md)', marginBottom:4, fontSize:13 }}>
+              <span style={{ color:'var(--grey-400)' }}>→</span><span style={{ fontWeight:600 }}>{dep.title}</span>
+              <StatusBadge status={dep.status} small />
+            </div> : null;
+          })}
+        </div>
+      )}
+      {item.notes && <div style={{ marginBottom:20 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5, marginBottom:8 }}>Notes</div>
+        <p style={{ fontSize:13, color:'var(--fg-2)', lineHeight:1.6, padding:'10px 14px', background:'var(--grey-50)', borderRadius:'var(--r-md)', border:'1px solid var(--surface-hairline)' }}>{item.notes}</p>
+      </div>}
+      {(item.activity||[]).length > 0 && (
+        <div>
+          <div style={{ fontSize:12, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5, marginBottom:8 }}>Activity</div>
+          {[...(item.activity||[])].reverse().map((a,i) => (
+            <div key={i} style={{ display:'flex', gap:10, alignItems:'center', padding:'5px 0', borderBottom:'1px solid var(--surface-hairline)' }}>
+              <span style={{ width:6, height:6, borderRadius:'50%', background: a.type==='status'?'#4f63d2':a.type==='created'?'#10b981':'#f59e0b', flexShrink:0 }} />
+              <span style={{ fontSize:12, color:'var(--fg-2)', flex:1 }}>{a.label}</span>
+              <span style={{ fontSize:11, color:'var(--grey-500)' }}>{a.ts}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Status colour palettes — full card background treatment
+const STATUS_CARD = {
+  yet:      { bg:'#F3F4F6', border:'#D1D5DB', title:'#1f2937', sub:'#4B5563', dot:'#9CA3AF', hover:'#E5E7EB' },
+  progress: { bg:'#FFFBEB', border:'#FDE68A', title:'#78350f', sub:'#92400e', dot:'#FBBF24', hover:'#FEF3C7' },
+  done:     { bg:'#ECFDF5', border:'#6EE7B7', title:'#064e3b', sub:'#065f46', dot:'#10B981', hover:'#D1FAE5' },
+};
+
+// ─── ROADMAP CARD ───
+function RoadmapCard({ item, workstreams, quarters, allItems, onUpdate, onDelete, onDragStart }) {
+  const [detail, setDetail] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const sc = STATUS_CARD[item.status] || STATUS_CARD.yet;
+  const s = STATUSES.find(x=>x.id===item.status) || STATUSES[0];
+  const deps = (item.dependencies||[]).length;
+
+  return (
+    <>
+      <div draggable onDragStart={e=>{e.dataTransfer.setData('text/plain',item.id); onDragStart&&onDragStart(item.id);}}
+        onClick={()=>setDetail(true)}
+        onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
+        style={{ background: hovered ? sc.hover : sc.bg, borderRadius:'var(--r-lg)',
+          border:`1px solid ${sc.border}`, padding:'10px 12px',
+          cursor:'pointer', transition:'all .15s', userSelect:'none', marginBottom:7,
+          boxShadow: hovered ? '0 2px 8px rgba(0,0,0,.08)' : 'none',
+          transform: hovered ? 'translateY(-1px)' : 'none' }}>
+
+        {/* Status dot + title */}
+        <div style={{ display:'flex', alignItems:'flex-start', gap:7, marginBottom:7 }}>
+          <span style={{ width:8, height:8, borderRadius:'50%', background:sc.dot, flexShrink:0, marginTop:3 }} />
+          <span style={{ fontSize:12, fontWeight:700, color:sc.title, lineHeight:1.35, flex:1 }}>{item.title}</span>
+        </div>
+
+        {/* Priority + owner + deps row */}
+        <div style={{ display:'flex', alignItems:'center', gap:6, paddingLeft:15 }}>
+          <span style={{ fontSize:10, fontWeight:700, padding:'1px 7px', borderRadius:'var(--r-pill)',
+            background:`${PRIORITY_COLORS[item.priority]}22`, color:PRIORITY_COLORS[item.priority] }}>
+            {item.priority}
+          </span>
+          <span style={{ fontSize:10, fontWeight:600, padding:'1px 7px', borderRadius:'var(--r-pill)',
+            background: `${s.color}22`, color: sc.sub }}>
+            {s.label}
+          </span>
+          {item.owner && <span style={{ fontSize:10, color:sc.sub, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:80, marginLeft:'auto' }}>{item.owner}</span>}
+          {deps > 0 && <span style={{ fontSize:10, color:sc.sub }}>🔗{deps}</span>}
+        </div>
+      </div>
+
+      {detail && (
+        <Modal title="Initiative Details" onClose={()=>setDetail(false)} wide>
+          <ItemDetail item={item} quarters={quarters} workstreams={workstreams} allItems={allItems}
+            onUpdate={u=>{onUpdate(u);}} onDelete={onDelete} onClose={()=>setDetail(false)} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+// ─── BOARD VIEW ───
+function BoardView({ data, dispatch, filters }) {
+  const sortedQ = [...data.quarters].sort((a,b)=>a.order-b.order);
+  const sortedW = [...data.workstreams].sort((a,b)=>a.order-b.order);
+  const [dragOver, setDragOver] = useState(null); // {quarter, workstream}
+  const [addItem, setAddItem] = useState(null); // {quarter, workstream}
+  const [editQuarter, setEditQuarter] = useState(null);
+  const [editWs, setEditWs] = useState(null);
+
+  const filtered = useMemo(() => data.items.filter(item => {
+    if (filters.status && item.status !== filters.status) return false;
+    if (filters.priority && item.priority !== filters.priority) return false;
+    if (filters.quarter && item.quarter !== filters.quarter) return false;
+    if (filters.workstream && item.workstream !== filters.workstream) return false;
+    if (filters.owner && !item.owner?.toLowerCase().includes(filters.owner.toLowerCase())) return false;
+    if (filters.search && !item.title?.toLowerCase().includes(filters.search.toLowerCase()) && !item.description?.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    return true;
+  }), [data.items, filters]);
+
+  const handleDrop = (e, qId, wId) => {
+    e.preventDefault();
+    const itemId = e.dataTransfer.getData('text/plain');
+    if (!itemId) return;
+    dispatch({ type:'MOVE_ITEM', id:itemId, quarter:qId, workstream:wId });
+    setDragOver(null);
+  };
+
+  const scrollRef = useRef(null);
+  const mirrorRef = useRef(null);
+  const syncFromMirror = () => { if(scrollRef.current && mirrorRef.current) scrollRef.current.scrollLeft = mirrorRef.current.scrollLeft; };
+  const syncFromBoard  = () => { if(scrollRef.current && mirrorRef.current) mirrorRef.current.scrollLeft = scrollRef.current.scrollLeft; };
+
+  return (
+    <div>
+      {/* Top scrollbar mirror so user never has to scroll to the bottom to pan right */}
+      <div ref={mirrorRef} onScroll={syncFromMirror}
+        style={{ overflowX:'auto', overflowY:'hidden', height:10, background:'var(--grey-50)', borderBottom:'1px solid var(--surface-hairline)', cursor:'ew-resize' }}>
+        <div style={{ width: 160+sortedQ.length*240, height:1 }} />
+      </div>
+      <div ref={scrollRef} onScroll={syncFromBoard}
+        style={{ overflowX:'auto', overflowY:'auto', maxHeight:'calc(100vh - 190px)' }}>
+      <div style={{ display:'grid', gridTemplateColumns:`160px repeat(${sortedQ.length}, minmax(220px,1fr))`, minWidth: 160+sortedQ.length*240 }}>
+        {/* Header row */}
+        <div style={{ padding:'12px 16px', background:'#fff', position:'sticky', top:0, zIndex:10, borderBottom:'2px solid var(--surface-border)', borderRight:'1px solid var(--surface-border)' }}>
+          <span style={{ fontSize:12, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5 }}>Workstream</span>
+        </div>
+        {sortedQ.map(q => (
+          <div key={q.id} style={{ padding:'12px 16px', background:'#fff', position:'sticky', top:0, zIndex:10,
+            borderBottom:'2px solid var(--surface-border)', borderRight:'1px solid var(--surface-hairline)', display:'flex', alignItems:'center', gap:8, justifyContent:'space-between' }}>
+            <div>
+              {editQuarter===q.id ? (
+                <input autoFocus defaultValue={q.label} onBlur={e=>{dispatch({type:'UPDATE_QUARTER',id:q.id,label:e.target.value});setEditQuarter(null);}}
+                  onKeyDown={e=>{ if(e.key==='Enter'){dispatch({type:'UPDATE_QUARTER',id:q.id,label:e.target.value});setEditQuarter(null);}}}
+                  style={{ fontSize:14, fontWeight:700, border:'1px solid #4f63d2', borderRadius:4, padding:'2px 6px', width:'100%' }} />
+              ) : (
+                <span style={{ fontSize:14, fontWeight:800, color:'var(--fg-1)', cursor:'pointer' }} onDoubleClick={()=>setEditQuarter(q.id)}>{q.label}</span>
+              )}
+              <div style={{ fontSize:11, color:'var(--grey-500)' }}>{filtered.filter(i=>i.quarter===q.id).length} items</div>
+            </div>
+            <div style={{ display:'flex', gap:4 }}>
+              <button title="Add initiative" onClick={()=>setAddItem({quarter:q.id,workstream:sortedW[0]?.id})}
+                style={{ background:'none', width:24, height:24, borderRadius:4, fontSize:14, color:'var(--grey-400)', display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
+              <button title="Delete quarter" onClick={()=>{if(confirm('Delete this quarter? Items will be unassigned.'))dispatch({type:'DELETE_QUARTER',id:q.id});}}
+                style={{ background:'none', width:24, height:24, borderRadius:4, fontSize:12, color:'var(--grey-400)', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+            </div>
+          </div>
+        ))}
+
+        {/* Workstream rows */}
+        {sortedW.map(w => (
+          <React.Fragment key={w.id}>
+            <div style={{ padding:'10px 14px', background:`${w.color}10`, borderRight:'1px solid var(--surface-border)', borderBottom:'1px solid var(--surface-hairline)', display:'flex', alignItems:'flex-start', gap:6, minHeight:100 }}>
+              <div style={{ width:4, borderRadius:2, alignSelf:'stretch', background:w.color, flexShrink:0, marginTop:2 }} />
+              <div style={{ flex:1, minWidth:0 }}>
+                {editWs===w.id ? (
+                  <input autoFocus defaultValue={w.label} onBlur={e=>{dispatch({type:'UPDATE_WORKSTREAM',id:w.id,label:e.target.value});setEditWs(null);}}
+                    onKeyDown={e=>{ if(e.key==='Enter'){dispatch({type:'UPDATE_WORKSTREAM',id:w.id,label:e.target.value});setEditWs(null);}}}
+                    style={{ fontSize:12, fontWeight:700, border:'1px solid #4f63d2', borderRadius:4, padding:'2px 4px', width:'100%' }} />
+                ) : (
+                  <span style={{ fontSize:12, fontWeight:700, color:w.color, cursor:'pointer', lineHeight:1.3, display:'block' }} onDoubleClick={()=>setEditWs(w.id)}>{w.label}</span>
+                )}
+                <button title="Delete workstream" onClick={()=>{if(confirm('Delete this workstream?'))dispatch({type:'DELETE_WORKSTREAM',id:w.id});}}
+                  style={{ background:'none', fontSize:10, color:'var(--grey-400)', marginTop:4 }}>✕ remove</button>
+              </div>
+            </div>
+            {sortedQ.map(q => {
+              const cell = `${q.id}::${w.id}`;
+              const cellItems = filtered.filter(i=>i.quarter===q.id && i.workstream===w.id);
+              return (
+                <div key={q.id} onDragOver={e=>{e.preventDefault();setDragOver(cell);}} onDragLeave={()=>setDragOver(null)}
+                  onDrop={e=>handleDrop(e,q.id,w.id)}
+                  style={{ padding:'10px 10px', borderRight:'1px solid var(--surface-hairline)', borderBottom:'1px solid var(--surface-hairline)',
+                    minHeight:100, background: dragOver===cell ? '#edeffe' : 'transparent',
+                    outline: dragOver===cell ? '2px dashed #4f63d2' : 'none', transition:'background .1s' }}>
+                  {cellItems.map(item => (
+                    <RoadmapCard key={item.id} item={item} workstreams={data.workstreams} quarters={data.quarters} allItems={data.items}
+                      onUpdate={u=>dispatch({type:'UPDATE_ITEM',item:u})}
+                      onDelete={id=>dispatch({type:'DELETE_ITEM',id})} />
+                  ))}
+                  <button onClick={()=>setAddItem({quarter:q.id,workstream:w.id})}
+                    style={{ width:'100%', padding:'6px', border:'1px dashed var(--surface-border)', borderRadius:'var(--r-md)',
+                      background:'none', color:'var(--grey-400)', fontSize:12, cursor:'pointer', transition:'all .15s' }}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor='#4f63d2';e.currentTarget.style.color='#4f63d2';}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--surface-border)';e.currentTarget.style.color='var(--grey-400)';}}>
+                    + Add
+                  </button>
+                </div>
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+      </div>{/* end scrollRef */}
+      {addItem && (
+        <Modal title="New Initiative" onClose={()=>setAddItem(null)} wide>
+          <ItemForm item={{ quarter:addItem.quarter, workstream:addItem.workstream }} quarters={data.quarters} workstreams={data.workstreams} allItems={data.items}
+            onSave={item=>{dispatch({type:'ADD_ITEM',item:{...item,id:genId()}});setAddItem(null);}} onClose={()=>setAddItem(null)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── LIST VIEW (card grid, grouped by workstream) ───
+function ListView({ data, dispatch, filters }) {
+  const [editItem, setEditItem] = useState(null);
+  const [addItem, setAddItem] = useState(null);
+  const sortedW = [...data.workstreams].sort((a,b)=>a.order-b.order);
+
+  const filtered = useMemo(() => data.items.filter(item => {
+    if (filters.status && item.status !== filters.status) return false;
+    if (filters.priority && item.priority !== filters.priority) return false;
+    if (filters.quarter && item.quarter !== filters.quarter) return false;
+    if (filters.workstream && item.workstream !== filters.workstream) return false;
+    if (filters.owner && !item.owner?.toLowerCase().includes(filters.owner.toLowerCase())) return false;
+    if (filters.search && !item.title?.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    return true;
+  }), [data.items, filters]);
+
+  return (
+    <div style={{ padding:'0 0 24px' }}>
+      {sortedW.map(w => {
+        const wItems = filtered.filter(i => i.workstream === w.id);
+        if (wItems.length === 0) return null;
+        return (
+          <div key={w.id} style={{ marginBottom:24 }}>
+            {/* Workstream header */}
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 20px',
+              background:`${w.color}12`, borderBottom:`2px solid ${w.color}30`,
+              borderTop:'1px solid var(--surface-hairline)' }}>
+              <div style={{ width:5, height:20, borderRadius:3, background:w.color, flexShrink:0 }} />
+              <span style={{ fontSize:13, fontWeight:800, color:w.color, letterSpacing:.2 }}>{w.label}</span>
+              <span style={{ fontSize:11, fontWeight:600, color:w.color, opacity:.7, background:`${w.color}20`,
+                padding:'2px 8px', borderRadius:'var(--r-pill)' }}>{wItems.length} items</span>
+              <button onClick={()=>setAddItem({workstream:w.id, quarter:data.quarters[0]?.id})}
+                style={{ marginLeft:'auto', padding:'4px 12px', fontSize:11, fontWeight:700, borderRadius:'var(--r-pill)',
+                  border:`1px solid ${w.color}40`, background:`${w.color}10`, color:w.color, cursor:'pointer' }}>
+                + Add
+              </button>
+            </div>
+            {/* Cards row */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px,1fr))', gap:10, padding:'12px 16px',
+              background:'#fff' }}>
+              {wItems.map(item => (
+                <RoadmapCard key={item.id} item={item} workstreams={data.workstreams} quarters={data.quarters} allItems={data.items}
+                  onUpdate={u=>dispatch({type:'UPDATE_ITEM',item:u})}
+                  onDelete={id=>dispatch({type:'DELETE_ITEM',id})} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {filtered.length === 0 && (
+        <div style={{ padding:'60px 24px', textAlign:'center', color:'var(--grey-400)', fontSize:14 }}>
+          No initiatives match your filters.
+        </div>
+      )}
+      {editItem && <Modal title="Edit Initiative" onClose={()=>setEditItem(null)} wide>
+        <ItemForm item={editItem} quarters={data.quarters} workstreams={data.workstreams} allItems={data.items}
+          onSave={u=>{dispatch({type:'UPDATE_ITEM',item:u});setEditItem(null);}} onClose={()=>setEditItem(null)} />
+      </Modal>}
+      {addItem && <Modal title="New Initiative" onClose={()=>setAddItem(null)} wide>
+        <ItemForm item={addItem} quarters={data.quarters} workstreams={data.workstreams} allItems={data.items}
+          onSave={item=>{dispatch({type:'ADD_ITEM',item:{...item,id:genId()}});setAddItem(null);}} onClose={()=>setAddItem(null)} />
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── DASHBOARD ───
+function Dashboard({ data }) {
+  const chartRef1 = useRef(null), chartRef2 = useRef(null), chartRef3 = useRef(null);
+  const charts = useRef({});
+
+  const total = data.items.length;
+  const byStatus = { yet:0, progress:0, done:0 };
+  data.items.forEach(i => { byStatus[i.status] = (byStatus[i.status]||0)+1; });
+  const completePct = total > 0 ? Math.round(byStatus.done/total*100) : 0;
+
+  // ── QUARTER LOGIC ──────────────────────────────────────────────────────────
+  // The dashboard is INDEPENDENT of what quarter columns currently exist on the board.
+  // For each item:
+  //   plannedQuarter = the quarter it was originally assigned to (set once at creation, never changed)
+  //
+  // Completed items are counted in their plannedQuarter bucket — even if that quarter
+  // column has been deleted from the board.
+  // In-progress and yet-to-start items are counted in their plannedQuarter bucket too.
+  //
+  // We collect ALL distinct plannedQuarter values across all items, sort them, and build
+  // the chart from that — no dependency on data.quarters at all.
+
+  const shortLabel = (qid) => {
+    // Try to find a nice label from the quarters list first
+    const q = data.quarters.find(q => q.id === qid);
+    if (q) return q.label
+      .replace(' 2026','').replace(' 2025','').replace(' 2027','')
+      .replace(' (Jan to Mar)','').replace(' (Apr to Jun)','')
+      .replace(' (Jul to Sept)','').replace(' (Oct to Dec)','');
+    if (qid === 'pre-2026') return 'Pre-2026';
+    if (qid === 'completed') return 'Pre-2026';
+    return qid;
+  };
+
+  // Collect all unique plannedQuarter values, sorted logically
+  const allPlannedQIds = [...new Set(data.items.map(i => i.plannedQuarter || 'pre-2026'))];
+
+  // Sort: pre-2026 first, then by order of matching quarter in data.quarters, then alphabetically
+  const qOrder = (id) => {
+    if (id === 'pre-2026') return -1;
+    const q = data.quarters.find(q => q.id === id);
+    return q ? q.order : 999;
+  };
+  allPlannedQIds.sort((a,b) => qOrder(a) - qOrder(b));
+
+  // Per-plannedQuarter counts
+  const qRows = allPlannedQIds.map(qid => {
+    const qItems = data.items.filter(i => (i.plannedQuarter || 'pre-2026') === qid);
+    const done     = qItems.filter(i => i.status === 'done').length;
+    const progress = qItems.filter(i => i.status === 'progress').length;
+    const yet      = qItems.filter(i => i.status === 'yet').length;
+    const tot      = qItems.length;
+    return {
+      id: qid,
+      label: shortLabel(qid),
+      done, progress, yet,
+      total: tot,
+      pct: tot > 0 ? Math.round(done / tot * 100) : 0
+    };
+  });
+
+  // Workstream counts
+  const sortedW  = [...data.workstreams].sort((a,b)=>a.order-b.order);
+  const wLabels   = sortedW.map(w => w.label);
+  const wDone     = sortedW.map(w => data.items.filter(i=>i.workstream===w.id&&i.status==='done').length);
+  const wProgress = sortedW.map(w => data.items.filter(i=>i.workstream===w.id&&i.status==='progress').length);
+  const wYet      = sortedW.map(w => data.items.filter(i=>i.workstream===w.id&&i.status==='yet').length);
+
+  const depKey = data.items.map(i=>i.id+i.status+(i.plannedQuarter||'?')).join('|');
+
+  useEffect(() => {
+    ['chart1','chart2','chart3'].forEach(k => { if(charts.current[k]) { charts.current[k].destroy(); delete charts.current[k]; } });
+
+    if (chartRef1.current) charts.current.chart1 = new Chart(chartRef1.current, {
+      type: 'doughnut',
+      data: { labels:['Yet to Start','In Progress','Completed'],
+        datasets:[{ data:[byStatus.yet, byStatus.progress, byStatus.done],
+          backgroundColor:['#E5E7EB','#FDE68A','#6EE7B7'],
+          borderColor:['#9CA3AF','#FBBF24','#10B981'], borderWidth:2 }] },
+      options: { responsive:true, maintainAspectRatio:false, cutout:'68%',
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ` ${ctx.label}: ${ctx.raw}` } } } }
+    });
+
+    if (chartRef2.current) charts.current.chart2 = new Chart(chartRef2.current, {
+      type:'bar',
+      data: { labels: qRows.map(r=>r.label), datasets:[
+        { label:'Completed',    data:qRows.map(r=>r.done),     backgroundColor:'#10B981', stack:'s' },
+        { label:'In Progress',  data:qRows.map(r=>r.progress), backgroundColor:'#FBBF24', stack:'s' },
+        { label:'Yet to Start', data:qRows.map(r=>r.yet),      backgroundColor:'#E5E7EB', stack:'s' },
+      ]},
+      options: { responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${ctx.raw}` } } },
+        scales:{
+          x:{ grid:{display:false}, stacked:true },
+          y:{ beginAtZero:true, stacked:true, grid:{color:'#f1f5f9'}, ticks:{stepSize:1} }
+        }
+      }
+    });
+
+    if (chartRef3.current) charts.current.chart3 = new Chart(chartRef3.current, {
+      type:'bar',
+      data: { labels: wLabels, datasets:[
+        { label:'Completed',    data:wDone,     backgroundColor:'#10B981', stack:'s' },
+        { label:'In Progress',  data:wProgress, backgroundColor:'#FBBF24', stack:'s' },
+        { label:'Yet to Start', data:wYet,      backgroundColor:'#E5E7EB', stack:'s' },
+      ]},
+      options: { responsive:true, maintainAspectRatio:false, indexAxis:'y',
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${ctx.raw}` } } },
+        scales:{
+          x:{ beginAtZero:true, stacked:true, grid:{color:'#f1f5f9'}, ticks:{stepSize:1} },
+          y:{ grid:{display:false}, stacked:true }
+        }
+      }
+    });
+  }, [depKey]);
+
+  const metricCard = (label, value, color, sub) => (
+    <div style={{ background:'#fff', borderRadius:'var(--r-xl)', padding:'20px 24px', border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)' }}>
+      <div style={{ fontSize:11, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5, marginBottom:6 }}>{label}</div>
+      <div style={{ fontSize:30, fontWeight:800, color, fontFamily:'var(--font-display)', lineHeight:1 }}>{value}</div>
+      {sub && <div style={{ fontSize:11, color:'var(--grey-400)', marginTop:4 }}>{sub}</div>}
+    </div>
+  );
+
+  const legend = (items) => (
+    <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:12 }}>
+      {items.map(([l,c])=>(
+        <span key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--grey-600)' }}>
+          <span style={{ width:10, height:10, borderRadius:2, background:c, flexShrink:0 }} />{l}
+        </span>
+      ))}
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Metric cards */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(148px,1fr))', gap:14, marginBottom:20 }}>
+        {metricCard('Total', total, 'var(--fg-1)')}
+        {metricCard('Yet to Start', byStatus.yet, '#6b7280', `${total>0?Math.round(byStatus.yet/total*100):0}% of total`)}
+        {metricCard('In Progress', byStatus.progress, '#d97706', `${total>0?Math.round(byStatus.progress/total*100):0}% of total`)}
+        {metricCard('Completed', byStatus.done, '#059669', `${total>0?Math.round(byStatus.done/total*100):0}% of total`)}
+        {metricCard('Completion Rate', `${completePct}%`, '#4f63d2')}
+      </div>
+
+      {/* Charts row */}
+      <div style={{ display:'grid', gridTemplateColumns:'260px 1fr', gap:16, marginBottom:16 }}>
+        <div style={{ background:'#fff', borderRadius:'var(--r-xl)', padding:24, border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)' }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Overall Status</div>
+          <div style={{ fontSize:12, color:'var(--grey-400)', marginBottom:10 }}>All initiatives</div>
+          {legend([['Yet to Start','#E5E7EB'],['In Progress','#FBBF24'],['Completed','#10B981']])}
+          <div style={{ position:'relative', height:150 }}><canvas ref={chartRef1} /></div>
+          <div style={{ textAlign:'center', marginTop:8 }}>
+            <span style={{ fontSize:22, fontWeight:800, color:'#059669' }}>{completePct}%</span>
+            <span style={{ fontSize:11, color:'var(--grey-400)', display:'block' }}>complete</span>
+          </div>
+        </div>
+
+        <div style={{ background:'#fff', borderRadius:'var(--r-xl)', padding:24, border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)' }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Progress by Quarter</div>
+          <div style={{ fontSize:12, color:'var(--grey-400)', marginBottom:10 }}>
+            Tracked against each feature's planned quarter — persists even if that column is deleted
+          </div>
+          {legend([['Yet to Start','#E5E7EB'],['In Progress','#FBBF24'],['Completed','#10B981']])}
+          <div style={{ position:'relative', height:190 }}><canvas ref={chartRef2} /></div>
+        </div>
+      </div>
+
+      {/* Quarter breakdown table */}
+      <div style={{ background:'#fff', borderRadius:'var(--r-xl)', border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)', marginBottom:16, overflow:'hidden' }}>
+        <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--surface-hairline)', display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ fontSize:14, fontWeight:700 }}>Quarter Breakdown</div>
+          <span style={{ fontSize:12, color:'var(--grey-400)' }}>Each feature counted in its originally planned quarter, forever</span>
+        </div>
+        <table style={{ width:'100%', borderCollapse:'collapse' }}>
+          <thead>
+            <tr style={{ background:'var(--brand-violet-soft)' }}>
+              {['Quarter','Completed','In Progress','Yet to Start','Total','% Done'].map(h=>(
+                <th key={h} style={{ padding:'10px 20px', fontFamily:'var(--font-ui)', fontWeight:700, fontSize:12,
+                  color:'var(--grey-700)', textAlign:h==='Quarter'?'left':'center', borderBottom:'1px solid var(--surface-border)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {qRows.map((q,i)=>(
+              <tr key={i} style={{ borderBottom:'1px solid var(--surface-hairline)' }}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <td style={{ padding:'11px 20px', fontWeight:700, fontSize:13 }}>
+                  {q.label}
+                  {!data.quarters.find(dq=>dq.id===q.id) && q.id!=='pre-2026' && (
+                    <span style={{ marginLeft:6, fontSize:10, color:'#d97706', background:'#fef3c7', padding:'1px 6px', borderRadius:'var(--r-pill)' }}>column removed</span>
+                  )}
+                </td>
+                <td style={{ padding:'11px 20px', textAlign:'center' }}>
+                  <span style={{ display:'inline-block', minWidth:28, padding:'2px 10px', borderRadius:'var(--r-pill)', background:'#D1FAE5', color:'#065F46', fontWeight:700, fontSize:12 }}>{q.done}</span>
+                </td>
+                <td style={{ padding:'11px 20px', textAlign:'center' }}>
+                  <span style={{ display:'inline-block', minWidth:28, padding:'2px 10px', borderRadius:'var(--r-pill)', background:'#FEF3C7', color:'#92400E', fontWeight:700, fontSize:12 }}>{q.progress}</span>
+                </td>
+                <td style={{ padding:'11px 20px', textAlign:'center' }}>
+                  <span style={{ display:'inline-block', minWidth:28, padding:'2px 10px', borderRadius:'var(--r-pill)', background:'#F3F4F6', color:'#374151', fontWeight:700, fontSize:12 }}>{q.yet}</span>
+                </td>
+                <td style={{ padding:'11px 20px', textAlign:'center', fontSize:13, fontWeight:600, color:'var(--grey-600)' }}>{q.total}</td>
+                <td style={{ padding:'11px 20px', textAlign:'center' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, justifyContent:'center' }}>
+                    <div style={{ width:60, height:6, background:'#E5E7EB', borderRadius:3, overflow:'hidden' }}>
+                      <div style={{ width:`${q.pct}%`, height:'100%', background:'#10B981', borderRadius:3 }} />
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:700, color:'#059669', minWidth:32 }}>{q.pct}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Workstream stacked bar */}
+      <div style={{ background:'#fff', borderRadius:'var(--r-xl)', padding:24, border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)' }}>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Progress by Workstream</div>
+        <div style={{ fontSize:12, color:'var(--grey-400)', marginBottom:10 }}>Completed, in-progress & yet to start per agent</div>
+        {legend([['Yet to Start','#E5E7EB'],['In Progress','#FBBF24'],['Completed','#10B981']])}
+        <div style={{ position:'relative', height: Math.max(220, wLabels.length * 34) }}><canvas ref={chartRef3} /></div>
+      </div>
+    </div>
+  );
+}
+
+// ─── IMPORT/EXPORT ───
+function ImportExport({ data, onImport, onClose }) {
+  const [tab, setTab] = useState('export');
+  const [importText, setImportText] = useState('');
+
+  const exportCSV = () => {
+    const headers = ['Title','Description','Owner','Priority','Quarter','Workstream','Status','StartDate','TargetDate','Tags','Notes','CreatedAt','UpdatedAt'];
+    const rows = data.items.map(item => {
+      const q = data.quarters.find(q=>q.id===item.quarter)?.label||'';
+      const w = data.workstreams.find(w=>w.id===item.workstream)?.label||'';
+      const s = STATUSES.find(s=>s.id===item.status)?.label||'';
+      return [item.title,item.description,item.owner,item.priority,q,w,s,item.startDate,item.targetDate,(item.tags||[]).join(';'),item.notes,item.createdAt,item.updatedAt].map(v=>`"${(v||'').replace(/"/g,'""')}"`).join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='lisa-roadmap.csv'; a.click();
+  };
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='lisa-roadmap.json'; a.click();
+  };
+
+  const handleImportJSON = () => {
+    try {
+      const parsed = JSON.parse(importText);
+      if (parsed.items && parsed.quarters && parsed.workstreams) {
+        onImport(parsed);
+        onClose();
+      } else alert('Invalid roadmap JSON format');
+    } catch { alert('Invalid JSON'); }
+  };
+
+  return (
+    <div style={{ padding:24 }}>
+      <div style={{ display:'flex', gap:2, marginBottom:20, background:'var(--grey-100)', borderRadius:'var(--r-md)', padding:3 }}>
+        {['export','import'].map(t => (
+          <button key={t} onClick={()=>setTab(t)} style={{ flex:1, padding:'7px', borderRadius:'var(--r-sm)', border:'none',
+            background: tab===t ? '#fff' : 'transparent', fontWeight:700, fontSize:13, color: tab===t ? 'var(--fg-1)' : 'var(--grey-500)',
+            boxShadow: tab===t ? 'var(--shadow-100)' : 'none', textTransform:'capitalize' }}>
+            {t}
+          </button>
+        ))}
+      </div>
+      {tab==='export' ? (
+        <div>
+          <p style={{ fontSize:13, color:'var(--grey-500)', marginBottom:20 }}>{data.items.length} initiatives ready to export.</p>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <button onClick={exportCSV} style={{ padding:'12px 20px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)',
+              background:'#fff', fontSize:14, fontWeight:700, color:'var(--fg-1)', textAlign:'left', display:'flex', alignItems:'center', gap:12 }}>
+              <span style={{ fontSize:24 }}>📊</span>
+              <div><div>Export as CSV</div><div style={{ fontSize:12, fontWeight:400, color:'var(--grey-500)' }}>Compatible with Excel, Google Sheets</div></div>
+            </button>
+            <button onClick={exportJSON} style={{ padding:'12px 20px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)',
+              background:'#fff', fontSize:14, fontWeight:700, color:'var(--fg-1)', textAlign:'left', display:'flex', alignItems:'center', gap:12 }}>
+              <span style={{ fontSize:24 }}>📦</span>
+              <div><div>Export as JSON</div><div style={{ fontSize:12, fontWeight:400, color:'var(--grey-500)' }}>Full data backup, re-importable</div></div>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <p style={{ fontSize:13, color:'var(--grey-500)', marginBottom:12 }}>Paste exported JSON to restore a full roadmap backup.</p>
+          <textarea value={importText} onChange={e=>setImportText(e.target.value)} rows={10} placeholder='Paste JSON here...'
+            style={{ width:'100%', padding:'10px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:12, fontFamily:'monospace', resize:'vertical' }} />
+          <button onClick={handleImportJSON} style={{ marginTop:12, width:'100%', padding:'10px', borderRadius:'var(--r-md)',
+            background:'linear-gradient(90deg,#4A90E2,#9B59B6)', color:'#fff', fontSize:14, fontWeight:700, border:'none' }}>
+            Import Roadmap
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── REDUCER ───
+function reducer(state, action) {
+  switch (action.type) {
+    case 'ADD_ITEM': {
+      const item = { ...action.item };
+      if (!item.plannedQuarter) item.plannedQuarter = item.quarter;
+      return { ...state, items: [...state.items, item] };
+    }
+    case 'UPDATE_ITEM': {
+      const prev = state.items.find(i => i.id === action.item.id);
+      let updated = { ...action.item };
+      if (prev) updated.plannedQuarter = prev.plannedQuarter || prev.quarter;
+      if (!updated.plannedQuarter && updated.quarter && updated.quarter !== 'completed') {
+        updated.plannedQuarter = updated.quarter;
+      }
+      if (updated.status === 'done') {
+        updated.quarter = 'completed';
+        updated.completedAt = updated.completedAt || now();
+      } else {
+        updated.completedAt = null;
+        if (updated.quarter === 'completed') {
+          updated.quarter = updated.plannedQuarter || updated.quarter;
+        }
+      }
+      return { ...state, items: state.items.map(i => i.id===updated.id ? updated : i) };
+    }
+    case 'DELETE_ITEM': return { ...state, items: state.items.filter(i => i.id!==action.id) };
+    case 'MOVE_ITEM': {
+      return { ...state, items: state.items.map(i => {
+        if (i.id !== action.id) return i;
+        return { ...i, quarter:action.quarter, workstream:action.workstream, updatedAt:now(),
+          activity:[...(i.activity||[]),{type:'moved',label:`Moved to ${action.quarter}/${action.workstream}`,ts:now()}] };
+      })};
+    }
+    case 'ADD_QUARTER': return { ...state, quarters: [...state.quarters, action.quarter] };
+    case 'UPDATE_QUARTER': return { ...state, quarters: state.quarters.map(q => q.id===action.id ? {...q, label:action.label} : q) };
+    case 'DELETE_QUARTER': return { ...state, quarters: state.quarters.filter(q=>q.id!==action.id) };
+    case 'ADD_WORKSTREAM': return { ...state, workstreams: [...state.workstreams, action.workstream] };
+    case 'UPDATE_WORKSTREAM': return { ...state, workstreams: state.workstreams.map(w => w.id===action.id ? {...w, label:action.label} : w) };
+    case 'DELETE_WORKSTREAM': return { ...state, workstreams: state.workstreams.filter(w=>w.id!==action.id) };
+    // ── EPICS ──
+    case 'ADD_EPIC':    return { ...state, epics: [...(state.epics||[]), action.epic] };
+    case 'UPDATE_EPIC': return { ...state, epics: (state.epics||[]).map(e => e.id===action.epic.id ? action.epic : e) };
+    case 'DELETE_EPIC': return { ...state, epics: (state.epics||[]).filter(e => e.id!==action.id) };
+    case 'SET_EPICS':   return { ...state, epics: action.epics };
+    case 'IMPORT': return { epics:[], ...action.data };
+    default: return state;
+  }
+}
+
+// ─── EPIC STATUS CONFIG ───
+const EPIC_STATUSES = [
+  { id:'planned',    label:'Planned',     color:'#6366f1', bg:'#eef2ff', text:'#3730a3' },
+  { id:'active',     label:'Active',      color:'#f59e0b', bg:'#fffbeb', text:'#78350f' },
+  { id:'completed',  label:'Completed',   color:'#10b981', bg:'#ecfdf5', text:'#065f46' },
+];
+
+// ─── EPIC FORM ───
+function EpicForm({ epic, quarters, workstreams, allItems, onSave, onClose }) {
+  const isNew = !epic?.id;
+  const [form, setForm] = useState(epic || {
+    title:'', narrative:'', workstream: workstreams[0]?.id||'',
+    quarterStart: quarters.filter(q=>q.id!=='completed')[0]?.id||'',
+    quarterEnd:   quarters.filter(q=>q.id!=='completed')[0]?.id||'',
+    status:'planned', featureIds:[], color:''
+  });
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const w = workstreams.find(w=>w.id===form.workstream);
+  const realQ = quarters.filter(q=>q.id!=='completed').sort((a,b)=>a.order-b.order);
+
+  // Features available for this workstream
+  const wsFeatures = allItems.filter(i => i.workstream===form.workstream);
+  const toggleFeature = (id) => set('featureIds', form.featureIds.includes(id)
+    ? form.featureIds.filter(f=>f!==id) : [...form.featureIds, id]);
+
+  const handleSave = () => {
+    if (!form.title.trim()) return alert('Title is required');
+    onSave({ ...form, color: form.color || w?.color || '#4f63d2',
+      id: form.id || ('ep-'+Date.now()) });
+  };
+
+  const inp = (label, key, placeholder, type='text') => (
+    <div style={{ marginBottom:14 }}>
+      <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>{label}</label>
+      <input type={type} value={form[key]||''} onChange={e=>set(key,e.target.value)} placeholder={placeholder}
+        style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13 }}
+        onFocus={e=>e.target.style.borderColor='#4f63d2'} onBlur={e=>e.target.style.borderColor='var(--surface-border)'} />
+    </div>
+  );
+
+  return (
+    <div style={{ padding:24 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
+        <div style={{ gridColumn:'1/-1' }}>{inp('Epic Title *','title','e.g. Intelligent Briefing Platform')}</div>
+        <div style={{ gridColumn:'1/-1', marginBottom:14 }}>
+          <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>Narrative / Value Statement</label>
+          <textarea value={form.narrative||''} onChange={e=>set('narrative',e.target.value)} rows={3}
+            placeholder="The story this epic tells leadership — e.g. 'Transform how brand teams create briefs from a form-filling exercise into a guided, intelligent conversation...'"
+            style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, resize:'vertical', fontFamily:'var(--font-body)' }}
+            onFocus={e=>e.target.style.borderColor='#4f63d2'} onBlur={e=>e.target.style.borderColor='var(--surface-border)'} />
+        </div>
+
+        <div style={{ marginBottom:14 }}>
+          <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>Workstream</label>
+          <select value={form.workstream} onChange={e=>set('workstream',e.target.value)}
+            style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, background:'#fff' }}>
+            {workstreams.map(w=><option key={w.id} value={w.id}>{w.label}</option>)}
+          </select>
+        </div>
+
+        <div style={{ marginBottom:14 }}>
+          <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>Status</label>
+          <select value={form.status} onChange={e=>set('status',e.target.value)}
+            style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, background:'#fff' }}>
+            {EPIC_STATUSES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        </div>
+
+        <div style={{ marginBottom:14 }}>
+          <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>Quarter Start</label>
+          <select value={form.quarterStart} onChange={e=>set('quarterStart',e.target.value)}
+            style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, background:'#fff' }}>
+            {realQ.map(q=><option key={q.id} value={q.id}>{q.label}</option>)}
+          </select>
+        </div>
+
+        <div style={{ marginBottom:14 }}>
+          <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:4 }}>Quarter End</label>
+          <select value={form.quarterEnd} onChange={e=>set('quarterEnd',e.target.value)}
+            style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, background:'#fff' }}>
+            {realQ.map(q=><option key={q.id} value={q.id}>{q.label}</option>)}
+          </select>
+        </div>
+
+        <div style={{ gridColumn:'1/-1', marginBottom:14 }}>
+          <label style={{ display:'block', fontSize:12, fontWeight:700, color:'var(--grey-600)', marginBottom:8 }}>
+            Linked Features <span style={{ fontWeight:400, color:'var(--grey-400)' }}>({form.featureIds.length} selected)</span>
+          </label>
+          <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', padding:8 }}>
+            {wsFeatures.length === 0 && <div style={{ color:'var(--grey-400)', fontSize:12, padding:8 }}>No features in this workstream yet.</div>}
+            {wsFeatures.map(feat => {
+              const checked = form.featureIds.includes(feat.id);
+              const sc = STATUS_CARD[feat.status]||STATUS_CARD.yet;
+              return (
+                <label key={feat.id} style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'6px 8px', borderRadius:'var(--r-sm)',
+                  cursor:'pointer', background: checked ? `${w?.color||'#4f63d2'}10` : 'transparent', marginBottom:2 }}>
+                  <input type="checkbox" checked={checked} onChange={()=>toggleFeature(feat.id)} style={{ marginTop:2, flexShrink:0 }} />
+                  <div>
+                    <div style={{ fontSize:12, fontWeight: checked?700:400, color: sc.title }}>{feat.title}</div>
+                    <div style={{ fontSize:10, color:'var(--grey-400)' }}>{feat.plannedQuarter||feat.quarter}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:4 }}>
+        <button onClick={onClose} style={{ padding:'9px 20px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)', background:'#fff', fontSize:14, fontWeight:600, color:'var(--fg-2)' }}>Cancel</button>
+        <button onClick={handleSave} style={{ padding:'9px 20px', borderRadius:'var(--r-md)', background:'var(--lisa-gradient)', color:'#fff', fontSize:14, fontWeight:700, border:'none' }}>
+          {isNew ? 'Create Epic' : 'Save Epic'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── EPIC FEATURE DRAWER ───
+function EpicDrawer({ epic, data, onEdit, onDelete, onClose }) {
+  const w = data.workstreams.find(w=>w.id===epic.workstream);
+  const es = EPIC_STATUSES.find(s=>s.id===epic.status)||EPIC_STATUSES[0];
+  const features = (epic.featureIds||[]).map(id=>data.items.find(i=>i.id===id)).filter(Boolean);
+  const qStart = data.quarters.find(q=>q.id===epic.quarterStart);
+  const qEnd   = data.quarters.find(q=>q.id===epic.quarterEnd);
+
+  const shortQ = q => q?.label
+    .replace(' 2026','').replace(' 2027','')
+    .replace(' (Jan to Mar)','').replace(' (Apr to Jun)','')
+    .replace(' (Jul to Sept)','').replace(' (Oct to Dec)','') || '—';
+
+  return (
+    <div style={{ position:'fixed', top:0, right:0, bottom:0, width:480, background:'#fff',
+      boxShadow:'-4px 0 32px rgba(19,25,39,.15)', zIndex:9000, display:'flex', flexDirection:'column',
+      animation:'slideIn .2s ease' }}>
+      <style>{`@keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
+
+      {/* Header */}
+      <div style={{ padding:'20px 24px', borderBottom:'1px solid var(--surface-hairline)', flexShrink:0,
+        background:`linear-gradient(135deg, ${w?.color||'#4f63d2'}15 0%, transparent 100%)` }}>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:10 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+              <span style={{ width:10, height:10, borderRadius:'50%', background:w?.color||'#4f63d2', flexShrink:0 }} />
+              <span style={{ fontSize:11, fontWeight:700, color:w?.color||'#4f63d2', textTransform:'uppercase', letterSpacing:.5 }}>{w?.label}</span>
+              <span style={{ padding:'2px 8px', borderRadius:'var(--r-pill)', background:es.bg, color:es.text, fontSize:11, fontWeight:700 }}>{es.label}</span>
+            </div>
+            <h2 style={{ fontSize:20, fontWeight:800, color:'var(--fg-1)', lineHeight:1.25, marginBottom:6 }}>{epic.title}</h2>
+            <div style={{ fontSize:12, color:'var(--grey-500)' }}>{shortQ(qStart)} → {shortQ(qEnd)}</div>
+          </div>
+          <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+            <button onClick={onEdit} style={{ padding:'6px 12px', fontSize:12, fontWeight:700, borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)', background:'#fff', color:'var(--fg-2)' }}>Edit</button>
+            <button onClick={()=>{if(confirm('Delete this epic?')){onDelete(epic.id);onClose();}}} style={{ padding:'6px 12px', fontSize:12, fontWeight:700, borderRadius:'var(--r-md)', border:'none', background:'#fee2e2', color:'#dc2626' }}>Delete</button>
+            <button onClick={onClose} style={{ width:32, height:32, borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)', background:'#fff', fontSize:16, color:'var(--grey-500)', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Narrative */}
+      {epic.narrative && (
+        <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--surface-hairline)', flexShrink:0 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5, marginBottom:6 }}>The Story</div>
+          <p style={{ fontSize:14, color:'var(--fg-2)', lineHeight:1.65, fontStyle:'italic' }}>"{epic.narrative}"</p>
+        </div>
+      )}
+
+      {/* Features */}
+      <div style={{ flex:1, overflowY:'auto', padding:'16px 24px' }}>
+        <div style={{ fontSize:11, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5, marginBottom:12 }}>
+          Features ({features.length})
+        </div>
+        {features.length === 0 && (
+          <div style={{ color:'var(--grey-400)', fontSize:13, padding:'20px 0' }}>No features linked yet. Edit the epic to add features.</div>
+        )}
+        {features.map(feat => {
+          const sc = STATUS_CARD[feat.status]||STATUS_CARD.yet;
+          const s  = STATUSES.find(x=>x.id===feat.status)||STATUSES[0];
+          return (
+            <div key={feat.id} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px',
+              borderRadius:'var(--r-lg)', background:sc.bg, border:`1px solid ${sc.border}`, marginBottom:8 }}>
+              <span style={{ width:8, height:8, borderRadius:'50%', background:sc.dot, flexShrink:0, marginTop:4 }} />
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:sc.title, lineHeight:1.3, marginBottom:3 }}>{feat.title}</div>
+                <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                  <span style={{ fontSize:10, fontWeight:600, padding:'1px 7px', borderRadius:'var(--r-pill)', background:`${s.color}22`, color:sc.sub }}>{s.label}</span>
+                  <span style={{ fontSize:10, fontWeight:600, padding:'1px 7px', borderRadius:'var(--r-pill)', background:`${PRIORITY_COLORS[feat.priority]}18`, color:PRIORITY_COLORS[feat.priority] }}>{feat.priority}</span>
+                  {feat.plannedQuarter && feat.plannedQuarter!=='pre-2026' && (
+                    <span style={{ fontSize:10, color:'var(--grey-400)' }}>
+                      {data.quarters.find(q=>q.id===feat.plannedQuarter)?.label||feat.plannedQuarter}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── LEADERSHIP VIEW ───
+function LeadershipView({ data, dispatch }) {
+  const [activeEpic, setActiveEpic] = useState(null);
+  const [editEpic, setEditEpic]     = useState(null);
+  const [addEpic, setAddEpic]       = useState(null);
+  const [aiLoading, setAiLoading]   = useState(false);
+  const [aiError, setAiError]       = useState('');
+  const [aiDone, setAiDone]         = useState(false);
+
+  // Scroll refs — must be at top level, never inside nested functions
+  const mirrorRef = useRef(null);
+  const boardRef  = useRef(null);
+  const syncFromMirror = () => { if(boardRef.current)  boardRef.current.scrollLeft  = mirrorRef.current.scrollLeft; };
+  const syncFromBoard  = () => { if(mirrorRef.current) mirrorRef.current.scrollLeft = boardRef.current.scrollLeft; };
+
+  const epics   = data.epics || [];
+  const realQ   = [...data.quarters].filter(q=>q.id!=='completed').sort((a,b)=>a.order-b.order);
+  const sortedW = [...data.workstreams].sort((a,b)=>a.order-b.order);
+
+  const COL_W  = 200;
+  const ROW_H  = 52;
+  const LEFT_W = 200;
+
+  const qIdx = useMemo(() => {
+    const m = {};
+    realQ.forEach((q,i) => m[q.id]=i);
+    return m;
+  }, [realQ]);
+
+  const shortQ = q => q.label
+    .replace(' (Jan to Mar)','').replace(' (Apr to Jun)','')
+    .replace(' (Jul to Sept)','').replace(' (Oct to Dec)','');
+
+  // ── AI SUGGEST ──
+  const suggestEpics = useCallback(async () => {
+    setAiLoading(true); setAiError('');
+    try {
+      const grouped = {};
+      sortedW.forEach(w => {
+        const wItems = data.items.filter(i => i.workstream === w.id);
+        if (wItems.length) grouped[w.label] = {
+          id: w.id,
+          items: wItems.map(i => ({ id:i.id, title:i.title, quarter:i.plannedQuarter||i.quarter, status:i.status }))
+        };
+      });
+
+      const prompt = `You are a product strategist creating a leadership roadmap for LISA (Liaison Intelligence Super Agent) — an AI Digital Workforce platform for pharmaceutical commercial operations at Indegene.
+
+Here are all tactical features grouped by agent/workstream:
+${JSON.stringify(grouped, null, 2)}
+
+Available quarters: ${realQ.map(q=>`${q.id} ("${q.label}")`).join(', ')}
+
+Group features into strategic EPICS for a leadership audience:
+- 2–4 epics per workstream (skip workstreams with 0 features)
+- Epic title: bold executive capability statement, NOT a feature list
+- narrative: 1–2 sentences of pharma leadership business value
+- quarterStart / quarterEnd: from the available quarter IDs, based on when features are planned
+- status: "completed" if all linked features done, "active" if some in-progress, "planned" otherwise
+- featureIds: array of feature IDs from the input belonging to this epic
+
+Respond ONLY with a raw JSON array, no markdown, no explanation:
+[{"title":"...","narrative":"...","workstream":"ws_id","quarterStart":"q_id","quarterEnd":"q_id","status":"planned","featureIds":["id1"]}]`;
+
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 8000,
+          messages: [{ role:'user', content:prompt }]
+        })
+      });
+      const result = await res.json();
+      if (result.error) throw new Error(result.error.message);
+      const text = (result.content||[]).map(b=>b.text||'').join('').trim();
+      const cleaned = text.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/\s*```$/,'').trim();
+      const suggested = JSON.parse(cleaned);
+      if (!Array.isArray(suggested)) throw new Error('Expected JSON array');
+      const withIds = suggested.map((e,idx) => {
+        const w = data.workstreams.find(w=>w.id===e.workstream);
+        return { ...e, id:'ep-'+Date.now()+'-'+idx, color: w?.color||'#4f63d2' };
+      });
+      dispatch({ type:'SET_EPICS', epics: withIds });
+      setAiDone(true);
+    } catch(err) {
+      console.error(err);
+      setAiError('AI generation failed: '+(err.message||'unknown error')+'. You can add epics manually below.');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [data.items, data.workstreams, realQ, dispatch, sortedW]);
+
+  // Auto-generate on first mount if no epics exist
+  useEffect(() => {
+    if (epics.length === 0 && !aiLoading && !aiDone) {
+      suggestEpics();
+    }
+  }, []); // eslint-disable-line
+
+  const totalEpics     = epics.length;
+  const activeEpics    = epics.filter(e=>e.status==='active').length;
+  const completedEpics = epics.filter(e=>e.status==='completed').length;
+
+  return (
+    <div>
+      {/* Leadership header */}
+      <div style={{ background:'linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e3a5f 100%)',
+        borderRadius:'var(--r-xl)', padding:'28px 32px', marginBottom:20, color:'#fff', position:'relative', overflow:'hidden' }}>
+        <div style={{ position:'absolute', right:-40, top:-40, width:200, height:200, borderRadius:'50%', background:'rgba(255,255,255,.04)', pointerEvents:'none' }} />
+        <div style={{ display:'flex', alignItems:'flex-start', gap:20 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,.5)', textTransform:'uppercase', letterSpacing:1, marginBottom:6 }}>Leadership View</div>
+            <h1 style={{ fontSize:26, fontWeight:800, marginBottom:8, fontFamily:'var(--font-display)' }}>LISA Strategic Roadmap 2026</h1>
+            <p style={{ fontSize:14, color:'rgba(255,255,255,.7)', lineHeight:1.6, maxWidth:540 }}>
+              Strategic capability epics across agents and quarters. Click any bar to explore features and the story behind each epic.
+            </p>
+          </div>
+          <div style={{ display:'flex', gap:16, flexShrink:0 }}>
+            {[[totalEpics,'Epics'],[activeEpics,'Active'],[completedEpics,'Delivered']].map(([v,l])=>(
+              <div key={l} style={{ textAlign:'center', padding:'12px 16px', background:'rgba(255,255,255,.08)', borderRadius:'var(--r-lg)', minWidth:60 }}>
+                <div style={{ fontSize:24, fontWeight:800, lineHeight:1 }}>{v}</div>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginTop:3, fontWeight:600 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:10, marginTop:20, flexWrap:'wrap', alignItems:'center' }}>
+          {aiLoading ? (
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 18px',
+              borderRadius:'var(--r-md)', background:'rgba(255,255,255,.12)', border:'1px solid rgba(255,255,255,.2)' }}>
+              <span style={{ fontSize:18 }}>✨</span>
+              <div>
+                <div style={{ fontSize:13, fontWeight:700 }}>Generating strategic epics with AI…</div>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,.6)', marginTop:2 }}>Analysing {data.items.length} features across {sortedW.length} workstreams</div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button onClick={suggestEpics} style={{ padding:'8px 18px', borderRadius:'var(--r-md)', border:'none',
+                background:'linear-gradient(90deg,#6366f1,#9b59b6)', color:'#fff', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', gap:7 }}>
+                ✨ {epics.length > 0 ? 'Re-generate Epics' : 'Generate Epics with AI'}
+              </button>
+              <button onClick={()=>setAddEpic({ workstream:sortedW[0]?.id })}
+                style={{ padding:'8px 18px', borderRadius:'var(--r-md)', border:'1px solid rgba(255,255,255,.25)',
+                  background:'rgba(255,255,255,.08)', color:'#fff', fontSize:13, fontWeight:700 }}>
+                + Add Epic Manually
+              </button>
+              {epics.length > 0 && (
+                <span style={{ fontSize:12, color:'rgba(255,255,255,.55)' }}>
+                  {totalEpics} epics across {[...new Set(epics.map(e=>e.workstream))].length} workstreams — click any bar to explore
+                </span>
+              )}
+            </>
+          )}
+        </div>
+        {aiError && <div style={{ marginTop:12, padding:'10px 14px', background:'rgba(239,68,68,.15)', borderRadius:'var(--r-md)', fontSize:12, color:'#fca5a5' }}>{aiError}</div>}
+      </div>
+
+      {/* Timeline grid */}
+      {aiLoading ? (
+        <div style={{ background:'#fff', borderRadius:'var(--r-xl)', border:'1px solid var(--surface-border)',
+          padding:'80px 40px', textAlign:'center' }}>
+          <div style={{ fontSize:40, marginBottom:16 }}>✨</div>
+          <div style={{ fontSize:16, fontWeight:700, color:'var(--fg-1)', marginBottom:8 }}>AI is building your strategic roadmap…</div>
+          <div style={{ fontSize:13, color:'var(--grey-500)', maxWidth:400, margin:'0 auto', lineHeight:1.6 }}>
+            Grouping {data.items.length} features into executive-level epics. This takes about 15–20 seconds.
+          </div>
+          <div style={{ display:'flex', gap:8, justifyContent:'center', marginTop:24, flexWrap:'wrap' }}>
+            {sortedW.slice(0,6).map((w,i) => (
+              <div key={w.id} style={{ width:120, height:8, borderRadius:4, background:`${w.color}30`, position:'relative', overflow:'hidden' }}>
+                <div style={{ position:'absolute', top:0, left:0, bottom:0, width:'60%', background:w.color, borderRadius:4,
+                  animation:`pulse ${1+i*0.2}s ease-in-out infinite` }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background:'#fff', borderRadius:'var(--r-xl)', border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)' }}>
+          {/* Top mirror scrollbar */}
+          <div ref={mirrorRef} onScroll={syncFromMirror}
+            style={{ overflowX:'auto', overflowY:'hidden', height:10, background:'var(--grey-50)',
+              borderBottom:'1px solid var(--surface-hairline)', cursor:'ew-resize' }}>
+            <div style={{ width: LEFT_W + realQ.length*COL_W, height:1 }} />
+          </div>
+
+          {/* Main scrollable board */}
+          <div ref={boardRef} onScroll={syncFromBoard}
+            style={{ overflowX:'auto', overflowY:'auto', maxHeight:'calc(100vh - 320px)' }}>
+            <div style={{ minWidth: LEFT_W + realQ.length*COL_W }}>
+
+              {/* Quarter header */}
+              <div style={{ display:'grid', gridTemplateColumns:`${LEFT_W}px repeat(${realQ.length},${COL_W}px)`,
+                position:'sticky', top:0, zIndex:20, background:'#fff', borderBottom:'2px solid var(--surface-border)' }}>
+                <div style={{ padding:'14px 18px' }}>
+                  <span style={{ fontSize:11, fontWeight:700, color:'var(--grey-500)', textTransform:'uppercase', letterSpacing:.5 }}>Workstream</span>
+                </div>
+                {realQ.map((q,i) => (
+                  <div key={q.id} style={{ padding:'14px 16px', borderLeft:'1px solid var(--surface-hairline)', background:i%2===0?'#fff':'#fafbfd' }}>
+                    <div style={{ fontSize:13, fontWeight:800 }}>{shortQ(q)}</div>
+                    <div style={{ fontSize:10, color:'var(--grey-400)', marginTop:1 }}>
+                      {epics.filter(e => (qIdx[e.quarterStart]||0)<=i && (qIdx[e.quarterEnd]??qIdx[e.quarterStart]??0)>=i).length} epics
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Workstream rows */}
+              {sortedW.map(w => {
+                const wEpics = epics.filter(e => e.workstream === w.id);
+                return (
+                  <div key={w.id} style={{ display:'grid', gridTemplateColumns:`${LEFT_W}px 1fr`,
+                    borderBottom:'1px solid var(--surface-hairline)', minHeight: Math.max(2,wEpics.length)*ROW_H + 20 }}>
+
+                    {/* Workstream label */}
+                    <div style={{ padding:'12px 14px', background:`${w.color}08`, borderRight:'1px solid var(--surface-border)',
+                      display:'flex', flexDirection:'column', gap:4 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <div style={{ width:4, height:16, borderRadius:2, background:w.color, flexShrink:0 }} />
+                        <span style={{ fontSize:11, fontWeight:800, color:w.color, lineHeight:1.3 }}>{w.label}</span>
+                      </div>
+                      <span style={{ fontSize:10, color:w.color, opacity:.65, paddingLeft:10 }}>{wEpics.length} epic{wEpics.length!==1?'s':''}</span>
+                      <button onClick={()=>setAddEpic({workstream:w.id})}
+                        style={{ padding:'2px 8px', fontSize:10, fontWeight:700, borderRadius:'var(--r-pill)',
+                          border:`1px dashed ${w.color}70`, background:`${w.color}10`, color:w.color, cursor:'pointer', alignSelf:'flex-start', marginTop:2 }}>
+                        + Epic
+                      </button>
+                    </div>
+
+                    {/* Epic bars */}
+                    <div style={{ position:'relative', minHeight: Math.max(2,wEpics.length)*ROW_H + 20 }}>
+                      {/* Quarter stripe background */}
+                      <div style={{ position:'absolute', inset:0, display:'grid',
+                        gridTemplateColumns:`repeat(${realQ.length},${COL_W}px)`, pointerEvents:'none' }}>
+                        {realQ.map((q,i) => (
+                          <div key={q.id} style={{ borderLeft:'1px solid var(--surface-hairline)', background:i%2===0?'transparent':'#fafbfd' }} />
+                        ))}
+                      </div>
+
+                      {wEpics.length === 0 && !aiLoading && (
+                        <div style={{ position:'absolute', top:'50%', left:16, transform:'translateY(-50%)',
+                          fontSize:11, color:'var(--grey-300)', fontStyle:'italic', pointerEvents:'none' }}>
+                          No epics — click + Epic to add one
+                        </div>
+                      )}
+
+                      {wEpics.map((epic, rowIdx) => {
+                        const si     = qIdx[epic.quarterStart] ?? 0;
+                        const ei     = qIdx[epic.quarterEnd]   ?? si;
+                        const safeSi = Math.max(0, Math.min(si, realQ.length-1));
+                        const safeEi = Math.max(safeSi, Math.min(ei, realQ.length-1));
+                        const left   = safeSi * COL_W + 6;
+                        const width  = (safeEi - safeSi + 1) * COL_W - 12;
+                        const top    = rowIdx * ROW_H + 8;
+                        const es     = EPIC_STATUSES.find(s=>s.id===epic.status) || EPIC_STATUSES[0];
+                        const isOpen = activeEpic?.id === epic.id;
+
+                        return (
+                          <div key={epic.id} onClick={()=>setActiveEpic(isOpen ? null : epic)}
+                            style={{ position:'absolute', left, top, width, height:ROW_H-10,
+                              borderRadius:'var(--r-md)', cursor:'pointer', userSelect:'none',
+                              background: isOpen ? `linear-gradient(135deg,${epic.color},${epic.color}cc)` : `${epic.color}1a`,
+                              border:`2px solid ${isOpen ? epic.color : epic.color+'55'}`,
+                              display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 10px',
+                              transition:'all .15s', boxShadow: isOpen ? `0 4px 16px ${epic.color}40` : 'none', overflow:'hidden' }}
+                            onMouseEnter={e=>{ if(!isOpen){ e.currentTarget.style.background=`${epic.color}2e`; e.currentTarget.style.borderColor=epic.color; }}}
+                            onMouseLeave={e=>{ if(!isOpen){ e.currentTarget.style.background=`${epic.color}1a`; e.currentTarget.style.borderColor=`${epic.color}55`; }}}>
+
+                            <div style={{ display:'flex', alignItems:'center', gap:6, minWidth:0 }}>
+                              <span style={{ width:6, height:6, borderRadius:'50%', background:isOpen?'#fff':es.color, flexShrink:0 }} />
+                              <span style={{ fontSize:12, fontWeight:800,
+                                color:isOpen?'#fff':epic.color,
+                                whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', flex:1 }}>
+                                {epic.title}
+                              </span>
+                              {(epic.featureIds||[]).length > 0 && (
+                                <span style={{ fontSize:10, fontWeight:700, padding:'1px 6px', borderRadius:'var(--r-pill)', flexShrink:0,
+                                  background:isOpen?'rgba(255,255,255,.25)':'rgba(0,0,0,.07)',
+                                  color:isOpen?'#fff':epic.color }}>
+                                  {(epic.featureIds||[]).length}f
+                                </span>
+                              )}
+                            </div>
+                            {epic.narrative && width > 220 && (
+                              <div style={{ fontSize:10, marginTop:1, paddingLeft:12, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                                color:isOpen?'rgba(255,255,255,.75)':epic.color+'99' }}>
+                                {epic.narrative}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Backdrop + drawer */}
+      {activeEpic && (
+        <>
+          <div onClick={()=>setActiveEpic(null)}
+            style={{ position:'fixed', inset:0, background:'rgba(19,25,39,.3)', zIndex:8999 }} />
+          <EpicDrawer epic={activeEpic} data={data}
+            onEdit={()=>{ setEditEpic(activeEpic); setActiveEpic(null); }}
+            onDelete={id=>{ dispatch({type:'DELETE_EPIC',id}); setActiveEpic(null); }}
+            onClose={()=>setActiveEpic(null)} />
+        </>
+      )}
+
+      {/* Add / Edit epic modal */}
+      {(editEpic || addEpic) && (
+        <Modal title={editEpic ? 'Edit Epic' : 'New Epic'} onClose={()=>{ setEditEpic(null); setAddEpic(null); }} wide>
+          <EpicForm epic={editEpic || addEpic}
+            quarters={data.quarters} workstreams={data.workstreams} allItems={data.items}
+            onSave={epic=>{
+              const w = data.workstreams.find(w=>w.id===epic.workstream);
+              const withColor = { ...epic, color: epic.color||w?.color||'#4f63d2' };
+              if (epics.find(e=>e.id===epic.id)) dispatch({type:'UPDATE_EPIC',epic:withColor});
+              else dispatch({type:'ADD_EPIC',epic:withColor});
+              setEditEpic(null); setAddEpic(null);
+            }}
+            onClose={()=>{ setEditEpic(null); setAddEpic(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+
+
+function App() {
+  // Firebase is OPTIONAL — app works standalone with localStorage by default
+  const savedCfg = getFirebaseCfg();
+  const [fbReady, setFbReady]   = useState(false);
+  const [showFbModal, setShowFbModal] = useState(false); // setup shown as modal, not gate
+  const [syncStatus, setSyncStatus]   = useState('local'); // 'local' | 'syncing' | 'synced' | 'error'
+
+  // Roadmap data — localStorage by default, Firebase when connected
+  const [data, dispatch_] = React.useReducer(reducer, null, loadData);
+  const dispatch = useCallback((action) => { dispatch_(action); }, []);
+
+  // localStorage fallback — always save locally too
+  useEffect(() => {
+    try { localStorage.setItem('lisa-roadmap-v5', JSON.stringify(data)); } catch {}
+  }, [data]);
+
+  const writeLock = useRef(false);
+  const lastSent  = useRef(null);
+
+  // On mount — try to auto-connect if saved config exists
+  useEffect(() => {
+    if (savedCfg) {
+      const ok = initFirebase(savedCfg);
+      if (ok) setFbReady(true);
+      else clearFirebaseCfg();
+    }
+  }, []);
+
+  // Firebase subscription — only active when fbReady
+  useEffect(() => {
+    if (!fbReady) return;
+    const ref = fbRef();
+    if (!ref) return;
+    const handler = ref.child('data').on('value', snap => {
+      const val = snap.val();
+      if (!val) {
+        setSyncStatus('syncing');
+        ref.child('data').set(migrateData(data)).then(() => setSyncStatus('synced'));
+        return;
+      }
+      const serialised = JSON.stringify(val);
+      if (serialised !== lastSent.current) {
+        dispatch_({ type:'IMPORT', data: migrateData(val) });
+      }
+      setSyncStatus('synced');
+    }, () => setSyncStatus('error'));
+    return () => ref.child('data').off('value', handler);
+  }, [fbReady]);
+
+  // Push to Firebase when connected
+  useEffect(() => {
+    if (!fbReady) return;
+    const ref = fbRef();
+    if (!ref) return;
+    const serialised = JSON.stringify(data);
+    if (serialised === lastSent.current) return;
+    setSyncStatus('syncing');
+    lastSent.current = serialised;
+    ref.child('data').set(data)
+      .then(() => setSyncStatus('synced'))
+      .catch(() => setSyncStatus('error'));
+  }, [data, fbReady]);
+
+  const handleConnected = () => {
+    setFbReady(true);
+    setShowFbModal(false);
+  };
+
+  const handleDisconnect = () => {
+    clearFirebaseCfg();
+    if (_fbApp) { try { _fbApp.delete(); } catch {} }
+    _fbApp = null; _fbDb = null;
+    setFbReady(false);
+    setSyncStatus('local');
+  };
+
+  const [mode, setMode]     = useState('tactical');
+  const [view, setView]     = useState('board');
+  const [showDash, setShowDash]   = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [showAddQ, setShowAddQ] = useState(false);
+  const [showAddW, setShowAddW] = useState(false);
+  const [filters, setFilters] = useState({ status:'', priority:'', quarter:'', workstream:'', owner:'', search:'' });
+  const [showFilters, setShowFilters] = useState(false);
+  const [newQLabel, setNewQLabel] = useState('');
+  const [newWLabel, setNewWLabel] = useState('');
+
+  // No gate — app always opens. Firebase is opt-in.
+  const activeFilters = Object.values(filters).filter(Boolean).length;
+
+  const topBarBtn = (label, onClick, active, icon) => (
+    <button onClick={onClick} style={{ padding:'7px 14px', borderRadius:'var(--r-md)', border: active ? '1px solid #4f63d2' : '1px solid var(--surface-border)',
+      background: active ? '#edeffe' : '#fff', color: active ? '#4f63d2' : 'var(--fg-2)', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, transition:'all .15s' }}
+      onMouseEnter={e=>{ if(!active) e.currentTarget.style.background='var(--grey-50)'; }}
+      onMouseLeave={e=>{ if(!active) e.currentTarget.style.background='#fff'; }}>
+      {icon && <span>{icon}</span>}{label}
+    </button>
+  );
+
+  const WS_COLORS = ['#4f63d2','#9747ff','#10b981','#f59e0b','#e76f8f','#3b82f6','#ef4444'];
+
+  return (
+    <div style={{ minHeight:'100vh', background:'var(--surface-page)', fontFamily:'var(--font-body)' }}>
+      {/* TOP BAR */}
+      <div style={{ height:60, background:'#fff', borderBottom:'1px solid var(--surface-border)', position:'sticky', top:0, zIndex:100,
+        display:'flex', alignItems:'center', padding:'0 24px', gap:12, boxShadow:'var(--shadow-100)' }}>
+        {/* Logo */}
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginRight:8 }}>
+          <div style={{ width:32, height:32, borderRadius:'var(--r-md)', background:'var(--lisa-gradient)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <span style={{ color:'#fff', fontWeight:800, fontSize:15 }}>L</span>
+          </div>
+          <div>
+            <div style={{ fontSize:15, fontWeight:800, fontFamily:'var(--font-display)', lineHeight:1 }}>
+              <span style={{ background:'var(--lisa-gradient)', WebkitBackgroundClip:'text', backgroundClip:'text', color:'transparent' }}>LISA</span>
+              <span style={{ color:'var(--grey-700)' }}> Roadmap</span>
+            </div>
+            <div style={{ fontSize:10, color:'var(--grey-500)', fontWeight:600, textTransform:'uppercase', letterSpacing:.5 }}>Product Board</div>
+          </div>
+        </div>
+
+        {/* Mode switcher — Tactical vs Leadership */}
+        <div style={{ display:'flex', gap:2, background:'#1e1b4b', borderRadius:'var(--r-md)', padding:3, marginRight:4 }}>
+          {[['tactical','🗂 Tactical'],['leadership','🎯 Leadership']].map(([m,l])=>(
+            <button key={m} onClick={()=>{ setMode(m); setShowDash(false); }}
+              style={{ padding:'5px 14px', borderRadius:'var(--r-sm)', border:'none',
+                background: mode===m ? 'var(--lisa-gradient)' : 'transparent',
+                fontWeight:700, fontSize:12,
+                color: mode===m ? '#fff' : 'rgba(255,255,255,.5)',
+                boxShadow: mode===m ? '0 2px 8px rgba(0,0,0,.3)' : 'none',
+                transition:'all .15s' }}>
+              {l}
+            </button>
+          ))}
+        </div>
+
+        {/* Search — only in tactical mode */}
+        {mode==='tactical' && (
+          <div style={{ flex:1, maxWidth:280, position:'relative' }}>
+            <span style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'var(--grey-400)', fontSize:15 }}>🔍</span>
+            <input value={filters.search} onChange={e=>setFilters(f=>({...f,search:e.target.value}))} placeholder="Search initiatives..."
+              style={{ width:'100%', padding:'7px 12px 7px 32px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, background:'var(--grey-50)' }}
+              onFocus={e=>e.target.style.background='#fff'} onBlur={e=>e.target.style.background='var(--grey-50)'} />
+          </div>
+        )}
+
+        <div style={{ display:'flex', gap:8, alignItems:'center', marginLeft:'auto' }}>
+          <SyncIndicator status={syncStatus} />
+
+          {mode==='tactical' && (<>
+            {/* View toggle */}
+            <div style={{ display:'flex', gap:2, background:'var(--grey-100)', borderRadius:'var(--r-md)', padding:3 }}>
+              {[['board','🗂 Board'],['list','📋 List']].map(([v,l])=>(
+                <button key={v} onClick={()=>{setView(v);setShowDash(false);}} style={{ padding:'5px 12px', borderRadius:'var(--r-sm)', border:'none',
+                  background: view===v&&!showDash ? '#fff' : 'transparent', fontWeight:700, fontSize:12,
+                  color: view===v&&!showDash ? 'var(--fg-1)' : 'var(--grey-500)', boxShadow: view===v&&!showDash ? 'var(--shadow-100)' : 'none' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {topBarBtn('Dashboard', ()=>{setShowDash(d=>!d);}, showDash, '📊')}
+            {topBarBtn(`Filters${activeFilters>0?` (${activeFilters})`:''}`, ()=>setShowFilters(f=>!f), showFilters || activeFilters>0, '⚙️')}
+          </>)}
+
+          {topBarBtn('Import/Export', ()=>setShowImport(true), false, '↕')}
+          {fbReady ? (
+            <button onClick={handleDisconnect} title="Disconnect from Firebase"
+              style={{ padding:'7px 12px', borderRadius:'var(--r-md)', border:'1px solid #10b981',
+                background:'#ecfdf5', color:'#059669', fontSize:12, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}
+              onMouseEnter={e=>{ e.currentTarget.style.background='#d1fae5'; }}
+              onMouseLeave={e=>{ e.currentTarget.style.background='#ecfdf5'; }}>
+              🔗 Team Connected
+            </button>
+          ) : (
+            <button onClick={()=>setShowFbModal(true)} title="Connect team via Firebase"
+              style={{ padding:'7px 12px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)',
+                background:'#fff', color:'var(--grey-600)', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:5 }}
+              onMouseEnter={e=>{ e.currentTarget.style.background='var(--grey-50)'; }}
+              onMouseLeave={e=>{ e.currentTarget.style.background='#fff'; }}>
+              👥 Connect Team
+            </button>
+          )}
+
+          {mode==='tactical' && (
+            <button onClick={()=>setShowAddItem(true)} style={{ padding:'8px 18px', borderRadius:'var(--r-md)', border:'none',
+              background:'var(--lisa-gradient)', color:'#fff', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', gap:6 }}>
+              + New Initiative
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* FILTERS BAR */}
+      {showFilters && (
+        <div style={{ background:'#fff', borderBottom:'1px solid var(--surface-border)', padding:'12px 24px', display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
+          {[
+            ['Status','status', [{value:'',label:'All Statuses'},...STATUSES.map(s=>({value:s.id,label:s.label}))]],
+            ['Priority','priority', [{value:'',label:'All Priorities'},...PRIORITIES.map(p=>({value:p,label:p}))]],
+            ['Quarter','quarter', [{value:'',label:'All Quarters'},...data.quarters.map(q=>({value:q.id,label:q.label}))]],
+            ['Workstream','workstream', [{value:'',label:'All Workstreams'},...data.workstreams.map(w=>({value:w.id,label:w.label}))]],
+          ].map(([label,key,options])=>(
+            <select key={key} value={filters[key]} onChange={e=>setFilters(f=>({...f,[key]:e.target.value}))}
+              style={{ padding:'6px 10px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13, background:'#fff',
+                color: filters[key] ? '#4f63d2' : 'var(--fg-2)', fontWeight: filters[key] ? 700 : 400 }}>
+              {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          ))}
+          <input value={filters.owner} onChange={e=>setFilters(f=>({...f,owner:e.target.value}))} placeholder="Filter by owner..."
+            style={{ padding:'6px 10px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:13 }} />
+          {activeFilters > 0 && (
+            <button onClick={()=>setFilters({status:'',priority:'',quarter:'',workstream:'',owner:'',search:''})}
+              style={{ padding:'6px 12px', borderRadius:'var(--r-md)', border:'1px solid #ef4444', background:'#fee2e2', color:'#dc2626', fontSize:12, fontWeight:700 }}>
+              Clear All
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* MAIN CONTENT */}
+      <div style={{ padding:'16px 24px 24px' }}>
+
+        {mode === 'leadership' ? (
+          <LeadershipView data={data} dispatch={dispatch} />
+        ) : (
+          <>
+            {/* Page header — tactical only */}
+            <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
+              <div>
+                <h1 style={{ fontSize:24, fontWeight:800, fontFamily:'var(--font-display)', marginBottom:3 }}>
+                  {showDash ? 'Roadmap Dashboard' : view==='board' ? 'Board View' : 'List View'}
+                </h1>
+                <p style={{ fontSize:13, color:'var(--grey-500)' }}>{data.items.length} total initiatives · {data.quarters.length} quarters · {data.workstreams.length} workstreams</p>
+              </div>
+              {!showDash && (
+                <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                  {topBarBtn('+ Quarter', ()=>setShowAddQ(true), false)}
+                  {topBarBtn('+ Workstream', ()=>setShowAddW(true), false)}
+                </div>
+              )}
+            </div>
+
+            {showDash ? (
+              <Dashboard data={data} />
+            ) : view==='board' ? (
+              <div style={{ background:'#fff', borderRadius:'var(--r-xl)', border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)' }}>
+                <BoardView data={data} dispatch={dispatch} filters={filters} />
+              </div>
+            ) : (
+              <div style={{ background:'#fff', borderRadius:'var(--r-xl)', border:'1px solid var(--surface-border)', boxShadow:'var(--shadow-100)', overflow:'hidden' }}>
+                <ListView data={data} dispatch={dispatch} filters={filters} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* MODALS */}
+      {showAddItem && (
+        <Modal title="New Initiative" onClose={()=>setShowAddItem(false)} wide>
+          <ItemForm quarters={data.quarters} workstreams={data.workstreams} allItems={data.items}
+            onSave={item=>{dispatch({type:'ADD_ITEM',item:{...item,id:genId()}});setShowAddItem(false);}} onClose={()=>setShowAddItem(false)} />
+        </Modal>
+      )}
+      {showAddQ && (
+        <Modal title="Add Quarter" onClose={()=>{setShowAddQ(false);setNewQLabel('');}}>
+          <div style={{ padding:24 }}>
+            <label style={{ display:'block', fontSize:13, fontWeight:600, marginBottom:6 }}>Quarter Label</label>
+            <input value={newQLabel} onChange={e=>setNewQLabel(e.target.value)} placeholder="e.g. Q1 2027" autoFocus
+              style={{ width:'100%', padding:'9px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, marginBottom:16 }} />
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+              <button onClick={()=>{setShowAddQ(false);setNewQLabel('');}} style={{ padding:'8px 18px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)', background:'#fff', fontWeight:600, fontSize:13 }}>Cancel</button>
+              <button onClick={()=>{
+                if(!newQLabel.trim()) return;
+                const id = 'q-'+Date.now();
+                dispatch({type:'ADD_QUARTER',quarter:{id, label:newQLabel.trim(), order:data.quarters.length}});
+                setShowAddQ(false); setNewQLabel('');
+              }} style={{ padding:'8px 18px', borderRadius:'var(--r-md)', border:'none', background:'var(--lisa-gradient)', color:'#fff', fontWeight:700, fontSize:13 }}>Add Quarter</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showAddW && (
+        <Modal title="Add Workstream" onClose={()=>{setShowAddW(false);setNewWLabel('');}}>
+          <div style={{ padding:24 }}>
+            <label style={{ display:'block', fontSize:13, fontWeight:600, marginBottom:6 }}>Workstream Name</label>
+            <input value={newWLabel} onChange={e=>setNewWLabel(e.target.value)} placeholder="e.g. Security & Compliance" autoFocus
+              style={{ width:'100%', padding:'9px 12px', border:'1px solid var(--surface-border)', borderRadius:'var(--r-md)', fontSize:14, marginBottom:16 }} />
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+              <button onClick={()=>{setShowAddW(false);setNewWLabel('');}} style={{ padding:'8px 18px', borderRadius:'var(--r-md)', border:'1px solid var(--surface-border)', background:'#fff', fontWeight:600, fontSize:13 }}>Cancel</button>
+              <button onClick={()=>{
+                if(!newWLabel.trim()) return;
+                const id = 'w-'+Date.now();
+                const col = WS_COLORS[data.workstreams.length % WS_COLORS.length];
+                dispatch({type:'ADD_WORKSTREAM',workstream:{id, label:newWLabel.trim(), order:data.workstreams.length, color:col}});
+                setShowAddW(false); setNewWLabel('');
+              }} style={{ padding:'8px 18px', borderRadius:'var(--r-md)', border:'none', background:'var(--lisa-gradient)', color:'#fff', fontWeight:700, fontSize:13 }}>Add Workstream</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showImport && (
+        <Modal title="Import / Export" onClose={()=>setShowImport(false)}>
+          <ImportExport data={data} onImport={d=>dispatch({type:'IMPORT',data:d})} onClose={()=>setShowImport(false)} />
+        </Modal>
+      )}
+      {showFbModal && (
+        <Modal title="Connect Team via Firebase" onClose={()=>setShowFbModal(false)}>
+          <FirebaseSetup onConnected={handleConnected} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
